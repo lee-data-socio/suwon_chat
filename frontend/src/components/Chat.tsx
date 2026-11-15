@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Archive, ArrowUp, BarChart3, Moon, Sun } from "lucide-react";
+import { Archive, ArrowUp, BarChart3, LoaderCircle, Moon, Sun } from "lucide-react";
 import type { ChatMessage, ChatStatus, CompareKey, ContextItem, PanelState, Scenario } from "../types";
 import type { Theme } from "../lib/color";
 import { Markdown } from "../lib/markdown";
@@ -20,7 +20,7 @@ interface Props {
   onToggleTheme: () => void;
   onSend: (text: string, scenario?: Scenario) => void;
   onDetail: (state: PanelState, compare: CompareKey | null) => void;
-  onOpenReport: (item: ContextItem) => void;
+  onOpenReport: (item: ContextItem, pages: number[]) => void;
 }
 
 const keyOf = (s: PanelState) => `${s.qkey}|${s.attribute}|${s.adapter}`;
@@ -74,9 +74,19 @@ export function Chat({
     el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }, [draft]);
 
+  // 답변을 받는 중에 Enter를 치면 보내지 않는다. 조용히 무시하지 않고 이유를 알린다 (친 글은 그대로 둔다).
+  const [blocked, setBlocked] = useState(false);
+  useEffect(() => {
+    if (!busy) setBlocked(false);
+  }, [busy]);
+
   const submit = () => {
     const text = draft.trim();
-    if (!text || busy) return;
+    if (!text) return;
+    if (busy) {
+      setBlocked(true);
+      return;
+    }
     setDraft("");
     onSend(text);
   };
@@ -189,7 +199,7 @@ export function Chat({
               ref={inputRef}
               rows={1}
               value={draft}
-              placeholder="예: 연령별로 버스 만족도를 보여 줘"
+              placeholder={busy ? "답변을 받는 중입니다…" : "예: 연령별로 버스 만족도를 보여 줘"}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 // 한글 조합 중의 Enter는 보내지 않는다
@@ -200,10 +210,17 @@ export function Chat({
               }}
               aria-label="질문 입력"
             />
-            <button className="send" onClick={submit} disabled={busy || !draft.trim()} aria-label="보내기">
-              <ArrowUp size={17} />
+            <button
+              className={`send${busy ? " is-busy" : ""}`}
+              onClick={submit}
+              disabled={busy || !draft.trim()}
+              aria-label={busy ? "답변을 받는 중" : "보내기"}
+              title={busy ? "답변을 받는 중입니다" : undefined}
+            >
+              {busy ? <LoaderCircle size={17} className="spin" /> : <ArrowUp size={17} />}
             </button>
           </div>
+          {busy && blocked && <div className="chat-status">답변을 받는 중입니다. 끝나면 보낼 수 있습니다.</div>}
           {status && !status.available && (
             <div className="chat-status">대화 모델이 연결되지 않았습니다. 추천 질문의 결과는 볼 수 있습니다.</div>
           )}

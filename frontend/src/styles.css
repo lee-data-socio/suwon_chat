@@ -577,6 +577,14 @@ p {
   text-overflow: ellipsis;
 }
 
+/* 뺀 집단의 오차 줄: 카드와 같은 문구라 길다. 세 줄까지 쓴다 */
+.held-line.is-wrap {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
 .ladder {
   display: grid;
   gap: 2px;

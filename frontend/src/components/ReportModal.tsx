@@ -5,8 +5,10 @@ import type { ContextItem, Report } from "../types";
 import { cleanTitle } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 
-/** 참고 문서의 전문. 인용된 쪽을 표시해 두고 그 쪽으로 내려가 연다. */
-export function ReportModal({ item, onClose }: { item: ContextItem; onClose: () => void }) {
+/** 참고 문서의 전문. 인용된 쪽을 모두 표시해 두고, 그 가운데 가장 앞쪽으로 내려가 연다. */
+export function ReportModal({ item, pages: citedPages, onClose }: { item: ContextItem; pages: number[]; onClose: () => void }) {
+  const isCited = (page: number) => citedPages.includes(page);
+  const firstCited = Math.min(...citedPages);
   const [report, setReport] = useState<Report | null>(null);
   const [failed, setFailed] = useState(false);
   const cited = useRef<HTMLElement | null>(null);
@@ -52,11 +54,11 @@ export function ReportModal({ item, onClose }: { item: ContextItem; onClose: () 
           {pages.map((pg) => (
             <section
               key={pg.page}
-              className={`report-page${pg.page === item.page ? " is-cited" : ""}`}
-              ref={pg.page === item.page ? (el) => void (cited.current = el) : undefined}
+              className={`report-page${isCited(pg.page) ? " is-cited" : ""}`}
+              ref={pg.page === firstCited ? (el) => void (cited.current = el) : undefined}
             >
               <div className="report-pageno">
-                {pg.page}쪽{pg.page === item.page && <span>인용된 쪽</span>}
+                {pg.page}쪽{isCited(pg.page) && <span>인용된 쪽</span>}
               </div>
               <Markdown text={pg.text} />
             </section>

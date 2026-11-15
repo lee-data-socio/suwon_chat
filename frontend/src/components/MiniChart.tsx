@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { GroupRow, Prediction } from "../types";
 import type { Theme } from "../lib/color";
 import { nominalFills, ordinalSwatches, stackOrder } from "../lib/color";
@@ -17,6 +17,31 @@ interface Props {
 }
 
 /**
+ * 요소의 배치 너비. 막대는 처음에 0에서 자라나는 애니메이션(transform)을 하므로,
+ * 화면에 보이는 크기(getBoundingClientRect)가 아니라 배치 크기를 잰다.
+ */
+function useLayoutWidth() {
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!el) return;
+    setWidth(el.offsetWidth);
+    const ro = new ResizeObserver(() => setWidth(el.offsetWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return [setEl, width] as const;
+}
+
+/** 색 위에 올리는 글자색: 밝은 색(노랑, 밝은 회색) 위에는 검정, 나머지는 흰색 */
+function inkOn(fill: string): string {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(fill.slice(i, i + 2), 16) / 255);
+  const lin = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const luminance = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return luminance > 0.36 ? "#0b0b0b" : "#ffffff";
+}
+
+/**
  * 답변 안에 들어가는 작은 차트. 집단마다 예측 막대와 실측 막대를 위아래로 붙여,
  * 두 막대가 얼마나 겹치는지만 읽히게 한다. 자세한 숫자는 막대에 마우스를 올리거나 '자세히 보기'에서 본다.
  */
@@ -24,6 +49,7 @@ export function MiniChart({ p, series, theme }: Props) {
   const q = p.question;
   const kind = q.scale_type;
   const tip = useTip();
+  const [stackRef, stackWidth] = useLayoutWidth(); // 막대 하나의 너비. 칸에 숫자가 들어갈지 정하는 데 쓴다
   const swatches = useMemo(() => ordinalSwatches(q.option_values, theme), [q.option_values, theme]);
   const order = useMemo(
     () => (kind === "순서형" ? stackOrder(q.option_values) : q.options.map((_, i) => i)),
@@ -77,7 +103,7 @@ export function MiniChart({ p, series, theme }: Props) {
       </div>
 
       <div className="mc-rows">
-        {p.groups.map((g) => (
+        {p.groups.map((g, gi) => (
           <div className={`mc-group${g.held_out ? " is-held" : ""}`} key={g.group}>
             <div className="mc-label">
               <div className="mc-name" title={g.group}>
@@ -89,7 +115,7 @@ export function MiniChart({ p, series, theme }: Props) {
               </div>
             </div>
             <div className="mc-lines">
-              {series.map((s) => {
+              {series.map((s, si) => {
                 const d = distOf(p, g, s.key);
                 const minor = !isMain(s.key);
                 return (
@@ -108,7 +134,12 @@ export function MiniChart({ p, series, theme }: Props) {
                         {d && <div className={`mc-fill series-${s.key}`} style={{ width: `${d[0] * 100}%` }} />}
                       </div>
                     ) : (
-                      <div className="mc-stack" role="img" aria-label={`${g.group} ${s.name}`}>
+                      <div
+                        className="mc-stack"
+                        role="img"
+                        aria-label={`${g.group} ${s.name}`}
+                        ref={gi === 0 && si === 0 ? stackRef : undefined}
+                      >
                         {d &&
                           order.map((i) => (
                             <div
@@ -118,10 +149,14 @@ export function MiniChart({ p, series, theme }: Props) {
                                 flexGrow: Math.max(d[i], 0.00001),
                                 display: d[i] < 0.004 ? "none" : undefined,
                                 background: fills[i],
+                                color: inkOn(fills[i]),
                               }}
                               onPointerMove={(e) => tip.show(e, optionTip(g, i))}
                               onPointerLeave={tip.hide}
-                            />
+                            >
+                              {/* 명목형은 색만으로 보기 8개를 가리기 어렵다. 칸이 넓으면 비율을 적는다 */}
+                              {kind === "명목형" && !minor && d[i] * stackWidth >= 34 && <span>{Math.round(d[i] * 100)}%</span>}
+                            </div>
                           ))}
                       </div>
                     )}

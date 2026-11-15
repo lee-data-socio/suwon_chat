@@ -1,6 +1,6 @@
 import type { Prediction } from "../types";
-import { corr, metricName, num } from "../lib/format";
-import { adapterLabel, adapterShort, REFERENCE_ID } from "../lib/labels";
+import { cardStats, corr, metricName, num, readable } from "../lib/format";
+import { adapterLabel, REFERENCE_ID } from "../lib/labels";
 import { Hint } from "./Tooltip";
 
 /** 오차 요약. 좋은 숫자만 고르지 않고, 견줄 대상과 집단 차이의 약점까지 한 줄에 둔다. */
@@ -13,14 +13,15 @@ export function SummaryStrip({ p }: { p: Prediction }) {
   const [heroLead, heroValue, heroTrail] = m ? [m[1].trim(), m[2], m[3].trim()] : ["", text, ""];
   const refName = adapterLabel(REFERENCE_ID);
 
+  // 학습에서 뺀 집단이 있으면 대화 속 카드는 그 집단의 오차를 앞세운다. 여기 큰 숫자는 집단 평균이므로,
+  // 같은 문구로 그 집단의 오차를 바로 아래에 적어 두 숫자가 무엇인지 헷갈리지 않게 한다.
   const held = p.groups.filter((g) => g.held_out);
-  const heldLine =
-    held.length > 0
-      ? `뺀 집단 ${held[0].group} ${num(held[0].error, 3)}` +
-        (held[0].reference ? ` (${adapterShort(REFERENCE_ID)} ${num(held[0].reference.error, 3)})` : "")
-      : q.held_out
-        ? "이 어댑터가 학습에서 뺀 문항이다"
-        : null;
+  const stats = held.length === 1 ? cardStats(p, "reference") : null;
+  const heldLine = stats
+    ? `${stats.main.label} ${readable(p, held[0].error)}` + (stats.versus ? ` · ${stats.versus.label} ${stats.versus.value}` : "")
+    : q.held_out
+      ? "이 어댑터가 학습에서 뺀 문항이다"
+      : null;
 
   const rows: { key: string; label: string; hint: string; value: number | null }[] = [
     {
@@ -69,7 +70,7 @@ export function SummaryStrip({ p }: { p: Prediction }) {
       <div className="tile tile-hero">
         <div className="tile-label">
           <Hint text={`${p.attribute.label} ${p.groups.length}개 집단의 예측이 ${p.predict_year}년 실측과 평균적으로 얼마나 다른지 나타낸다.`}>
-            평균 오차
+            집단 평균 오차 <span className="tile-lead">{p.groups.length}개 집단의 평균</span>
           </Hint>
         </div>
         <div className={`hero${m ? "" : " is-text"}`}>
@@ -78,11 +79,14 @@ export function SummaryStrip({ p }: { p: Prediction }) {
           {heroTrail && <span className="hero-word">{heroTrail}</span>}
         </div>
         <div className="tile-sub">
-          <span>
-            {metricName(s.error_metric)} {num(s.error, 3)}
-          </span>
+          {/* 뺀 집단의 줄이 길어 자리가 모자라면 분포 거리는 옆의 '오차 견주기' 첫 줄에서 본다 */}
+          {!stats && (
+            <span>
+              {metricName(s.error_metric)} {num(s.error, 3)}
+            </span>
+          )}
           {heldLine && (
-            <span className="held-line" title={heldLine}>
+            <span className={`held-line${stats ? " is-wrap" : ""}`} title={heldLine}>
               {heldLine}
             </span>
           )}

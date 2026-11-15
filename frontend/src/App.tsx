@@ -72,7 +72,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [report, setReport] = useState<ContextItem | null>(null);
+  const [report, setReport] = useState<{ item: ContextItem; pages: number[] } | null>(null);
   const nextId = useRef(1);
   const detailRef = useRef(detail);
   detailRef.current = detail;
@@ -205,7 +205,12 @@ export default function App() {
             }
             case "context":
               gotContext = true;
-              patchMessage(answerId, (m) => ({ ...m, context: e.items }));
+              // 한 답변에 여러 번 올 수 있다 (문항에 붙은 문서, 대화 모델이 따로 찾은 문서). 먼저 온 것을 앞에 두고 합친다.
+              patchMessage(answerId, (m) => {
+                const have = m.context ?? [];
+                const seen = new Set(have.map((it) => `${it.doc_id}:${it.page}`));
+                return { ...m, context: [...have, ...e.items.filter((it) => !seen.has(`${it.doc_id}:${it.page}`))] };
+              });
               break;
             case "saved":
               patchMessage(answerId, (m) => ({ ...m, saved: { saved_at: e.saved_at, model: e.model } }));
@@ -229,7 +234,12 @@ export default function App() {
         // 서버가 끝을 알리지 않고 닫았으면 잘린 답이다. 완성된 답처럼 두지 않는다.
         if (!finished) patchMessage(answerId, (m) => ({ ...m, notice: "답변이 중간에 끊겼습니다." }));
       } catch {
-        patchMessage(answerId, (m) => ({ ...m, notice: "서버와 연결이 끊겼습니다. 결과 카드는 그대로 볼 수 있습니다." }));
+        patchMessage(answerId, (m) => ({
+          ...m,
+          notice: m.parts.some((p) => p.kind === "card")
+            ? "서버와 연결이 끊겼습니다. 결과 카드는 그대로 볼 수 있습니다."
+            : "서버와 연결이 끊겼습니다. 잠시 뒤 다시 물어 주세요.",
+        }));
       } finally {
         patchMessage(answerId, (m) => ({ ...m, pending: false, status: undefined }));
         setBusy(false);
@@ -261,7 +271,7 @@ export default function App() {
           onToggleTheme={toggleTheme}
           onSend={send}
           onDetail={openDetail}
-          onOpenReport={setReport}
+          onOpenReport={(item, pages) => setReport({ item, pages })}
         />
         {detail && meta && (
           <ResultPanel
@@ -279,7 +289,7 @@ export default function App() {
           />
         )}
       </div>
-      {report && <ReportModal item={report} onClose={() => setReport(null)} />}
+      {report && <ReportModal item={report.item} pages={report.pages} onClose={() => setReport(null)} />}
     </TipProvider>
   );
 }

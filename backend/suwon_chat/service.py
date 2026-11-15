@@ -219,8 +219,11 @@ class Service:
         """대화 LLM에는 차트 자료 전체가 아니라 문장에 쓸 요약만 준다. 차트 자료는 화면으로 직접 간다."""
         p = self.prediction(qkey, attribute, adapter)
         s, q = p["summary"], p["question"]
+        width = (q["scale_max"] - q["scale_min"]) if q["scale_max"] is not None else None
         r4 = lambda v: None if v is None else round(v, 4)
         r2 = lambda v: None if v is None else round(v, 2)
+        question = self.store.questions[qkey]
+        read = lambda v: None if v is None else self._readable(question, v, width)["text"]
         return {
             "문항": {"qkey": q["qkey"], "문구": q["text"], "종류": q["scale_type"], "보기": q["options"],
                     "채점범위": q["scored"], "이_어댑터가_학습에서_뺀_문항": q["held_out"]},
@@ -231,17 +234,25 @@ class Service:
             "평균_오차": r4(s["error"]),
             "평균_오차_읽기": s["error_readable"]["text"],
             "학습_전_모델_오차": r4(s["zero_shot_error"]),
+            "학습_전_모델_오차_읽기": read(s["zero_shot_error"]),
             "작년_실측을_그대로_쓴_경우_오차": r4(s["last_year_error"]),
+            "작년_실측을_그대로_쓴_경우_오차_읽기": read(s["last_year_error"]),
             "사람_응답의_표본오차_하한": r4(s["lower_bound"]),
             "기본_모델_오차": r4(s["reference_error"]),
+            "기본_모델_오차_읽기": read(s["reference_error"]),
             "집단_평균_높낮이_상관": r2(s["order_corr"]),
             "집단_평균_벌어짐_예측": r2(s["spread_predicted"]),
             "집단_평균_벌어짐_실측": r2(s["spread_actual"]),
             "집단별": [
                 {"집단": g["group"], "응답자수": g["n"], "학습에서_뺀_집단": g["held_out"],
                  "예측_평균": r2(g["predicted_mean"]), "실측_평균": r2(g["actual_mean"]),
-                 "오차": r4(g["error"]),
+                 # 평균의 차이와 분포의 오차는 다른 값이다. 문장에서 섞이지 않게 둘 다 이름을 붙여 준다.
+                 "평균_차이_예측_빼기_실측": (r2(g["predicted_mean"] - g["actual_mean"])
+                                      if g["predicted_mean"] is not None else None),
+                 "분포_오차": r4(g["error"]),
+                 "분포_오차_읽기": read(g["error"]),
                  "기본_모델_오차": r4(g["reference"]["error"]) if g["reference"] else None,
+                 "기본_모델_오차_읽기": read(g["reference"]["error"]) if g["reference"] else None,
                  "예측_분포": [round(v, 3) for v in g["predicted"]],
                  "실측_분포": [round(v, 3) for v in g["actual"]]}
                 for g in p["groups"]],

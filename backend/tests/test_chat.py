@@ -153,3 +153,14 @@ def test_tool_enums_cover_all_attributes_and_adapters(service):
     props = {t["name"]: t for t in tools(service)}["get_prediction"]["input_schema"]["properties"]
     assert set(props["attribute"]["enum"]) == set(service.store.groups)
     assert props["adapter"]["enum"] == ["exp1", "exp2", "exp3"]
+
+
+def test_text_before_and_after_a_tool_call_is_separated_by_a_paragraph_break(service):
+    args = {"qkey": "q189_W2025", "attribute": "SEX", "adapter": "exp1"}
+    client = FakeClient([
+        {"text": ["교차 집단은 예측하지 못합니다."], "tools": [("get_prediction", args)], "stop": "tool_use"},
+        {"text": ["성별로 ", "보면 이렇습니다."]},
+    ])
+    events = collect(client, service, [{"role": "user", "content": "30대 여성은?"}])
+    text = "".join(d["delta"] for e, d in events if e == "text")
+    assert text == "교차 집단은 예측하지 못합니다.\n\n성별로 보면 이렇습니다."

@@ -77,12 +77,15 @@ def system_prompt(service: Service) -> str:
 # 답하는 방법
 - 예측이나 실측에 관한 질문이면 `get_prediction`을 불러 숫자를 가져온 뒤 답한다. 도구를 부르면 패널이 그 차트로 바뀌므로, 답변에 표를 그리거나 분포 전체를 나열하지 않는다. 차트를 보면 알 수 있는 것을 글로 되풀이하지 말고, 차트에서 눈여겨볼 점을 3~5문장으로 짚는다.
 - 숫자는 도구 결과에 있는 값만 쓴다. 기억이나 추정으로 숫자를 만들지 않는다. 청중은 이 조사를 직접 설계한 사람들이어서 지어낸 숫자를 바로 알아본다.
+- 평균의 차이와 분포의 오차는 다른 값이다. "예측 평균이 실측보다 몇 점 높다"는 `평균_차이_예측_빼기_실측`으로 말하고, "분포가 얼마나 어긋났나"는 `분포_오차_읽기`나 `평균_오차_읽기`로 말한다. 둘을 섞어 "평균이 0.3점 차이"처럼 쓰지 않는다. 숫자를 직접 빼거나 곱해서 새 숫자를 만들지 않는다. 점수로 바꾼 값은 `_읽기`로 끝나는 항목에 이미 있다.
 - 오차는 `평균_오차_읽기`의 표현(예: "7점 척도에서 약 0.2점")으로 먼저 말하고, 필요하면 WD 값을 덧붙인다. WD는 0~1 사이이고 작을수록 예측과 실측이 가깝다.
 - 사용자가 문항을 말로 설명하면 아래 문항 목록에서 가장 가까운 문항의 qkey를 고른다. 후보가 여럿이면 가장 가까운 하나로 먼저 보여 주고, 다른 후보가 있다고 한 줄로 알린다.
 - 사용자가 속성을 말하지 않으면 지금 패널의 속성을 그대로 쓴다. 어댑터도 마찬가지다.
+- 문항은 내용으로 부른다("경제·사회적 위치 문항"). `q189_W2025` 같은 문항 키나 `exp1` 같은 어댑터 키, `TENURE` 같은 속성 키는 화면을 보는 사람이 모르는 말이므로 답변에 쓰지 않는다.
+- 도구를 부르기 전에 쓴 말은 화면에 그대로 남는다. 도구 결과를 받은 뒤에는 앞에서 한 말을 되풀이하지 말고 이어서 쓴다.
 
 # 지켜야 할 한계 (이유와 함께)
-- **집단 사이의 차이를 과장하지 않는다.** 이 모델은 문항 전체의 분포는 잘 맞히지만 집단 사이의 차이는 실제보다 작게 예측하고, 집단의 높낮이 순서가 실제와 어긋나는 경우가 많다. 도구 결과의 `집단_평균_벌어짐_예측`이 `집단_평균_벌어짐_실측`보다 뚜렷이 작으면 그렇게 말하고, `집단_평균_높낮이_상관`이 낮거나 음수이면 집단 순서는 믿기 어렵다고 말한다. 예측 평균의 작은 차이를 근거로 "A 집단이 B 집단보다 높다"고 단정하지 않는다.
+- **집단 사이의 차이를 과장하지 않는다.** 이 모델은 문항 전체의 분포는 잘 맞히지만 집단 사이의 차이는 실제보다 작게 예측하고, 집단의 높낮이 순서가 실제와 어긋나는 경우가 많다. 도구 결과의 `집단_평균_벌어짐_예측`이 `집단_평균_벌어짐_실측`보다 뚜렷이 작으면 그렇게 말하고, `집단_평균_높낮이_상관`이 낮거나 음수이면 집단 순서는 믿기 어렵다고 말한다. 예측 평균의 작은 차이를 근거로 "A 집단이 B 집단보다 높다"고 단정하지 않는다. 반대로 문항 하나의 결과를 보고 "이 모델은 차이를 과장한다"처럼 모델 전체의 성향을 말하지도 않는다. 지금 보는 문항과 속성에 대해서만 말한다.
 - **교차 집단은 예측하지 못한다.** "30대 여성"처럼 두 속성을 겹친 집단은 학습한 적이 없다. 그렇다고 답한 뒤 두 속성 가운데 하나를 `get_prediction`으로 보여 주고, 다른 하나도 따로 볼 수 있다고 알린다.
 - **연도에 따른 변화는 예측하지 못한다.** 모델에 주는 입력에는 연도 정보가 없다. "내년에 어떻게 변해?"라는 질문에는 추세를 예측하는 모델이 아니라고 답한다. 이 모델이 하는 일은 조사를 돌리기 전에 그 문항의 응답 분포를 미리 그려 보는 것이다.
 - **새 문항은 이 화면에서 예측하지 못한다.** 지금은 저장된 예측을 조회하는 버전이라 목록에 없는 문항은 답할 수 없다. 새 문항 예측은 모델을 직접 돌리는 실시간 버전에서 하며, 그 결과는 실측이 없어 검증되지 않은 실험적인 값이라고 알린다.
@@ -96,7 +99,7 @@ def system_prompt(service: Service) -> str:
 
 # 어댑터
 {adapters_text(adapters)}
-exp2에서 뺀 집단의 예측, exp3에서 뺀 문항의 예측을 설명할 때는 도구 결과의 `기본_모델_오차`(그 집단·문항을 보고 학습한 모델의 오차)와 견줘 말한다.
+집단 제외 모델에서 뺀 집단, 문항 제외 모델에서 뺀 문항을 설명할 때는 "보지 않고 예측한 오차"와 "보고 학습한 기본 모델의 오차"(`기본_모델_오차_읽기`)를 반드시 나란히 말한다. 이 비교가 그 화면에서 보여 주려는 것이다.
 
 # {meta['predict_year']}년 문항 목록 (qkey | 종류 | 문구)
 {catalog}"""
@@ -143,7 +146,9 @@ async def run_chat(client, service: Service, history: list[dict], panel: dict | 
     system = [{"type": "text", "text": system_prompt(service), "cache_control": {"type": "ephemeral"}}]
     tool_defs = tools(service)
 
+    wrote_text = False   # 앞 차례에서 글을 썼으면 다음 차례의 글과 문단을 나눈다
     for _ in range(MAX_TURNS):
+        need_break = wrote_text
         try:
             async with client.messages.stream(
                 model=config.CHAT_MODEL,
@@ -157,6 +162,9 @@ async def run_chat(client, service: Service, history: list[dict], panel: dict | 
             ) as stream:
                 async for event in stream:
                     if event.type == "text":
+                        if need_break:
+                            yield "text", {"delta": "\n\n"}
+                            need_break = False
                         yield "text", {"delta": event.text}
                 response = await stream.get_final_message()
         except anthropic.AuthenticationError:
@@ -169,6 +177,8 @@ async def run_chat(client, service: Service, history: list[dict], panel: dict | 
             yield "error", {"code": "api_error", "message": f"Claude API 오류 ({e.status_code})"}
             return
 
+        if any(b.type == "text" and b.text.strip() for b in response.content):
+            wrote_text = True
         if response.stop_reason == "refusal":
             yield "error", {"code": "refusal", "message": "이 질문에는 답하지 못했습니다. 질문을 바꿔 다시 물어 주세요."}
             return

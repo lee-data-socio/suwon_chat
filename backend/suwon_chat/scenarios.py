@@ -16,8 +16,8 @@ SCENARIOS = [
     },
     {
         "id": "S3", "title": "못 본 집단",
-        "prompt": "50대 자료를 한 번도 보여 주지 않고 학습했다면 50대 예측은 어떻게 돼?",
-        "panel": {"qkey": "q189_W2025", "attribute": "AGE", "adapter": "exp2", "compare": "reference"},
+        "prompt": "20년 이상 거주자의 응답을 한 번도 보여 주지 않고 학습했다면, 수원시민 자부심 예측은 어떻게 돼?",
+        "panel": {"qkey": "q138_W2025", "attribute": "RESIDENCE_YEARS", "adapter": "exp2", "compare": "reference"},
     },
     {
         "id": "S4a", "title": "못 본 문항 · 잘 되는 경우",

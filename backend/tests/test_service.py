@@ -167,5 +167,7 @@ def test_brief_numbers_equal_panel_numbers(service):
     assert b["문항"]["이_어댑터가_학습에서_뺀_문항"] is True
     for row, g in zip(b["집단별"], p["groups"]):
         assert row["집단"] == g["group"]
-        assert row["오차"] == round(g["error"], 4)
+        assert row["분포_오차"] == round(g["error"], 4)
         assert row["예측_평균"] == round(g["predicted_mean"], 2)
+        assert row["평균_차이_예측_빼기_실측"] == round(g["predicted_mean"] - g["actual_mean"], 2)
+        assert row["분포_오차_읽기"] == f"7점 척도에서 약 {g['error'] * 6:.2f}점"

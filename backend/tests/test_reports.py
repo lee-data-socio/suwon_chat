@@ -39,6 +39,7 @@ def test_question_gets_the_closest_pages(report_index):
     items = report_index.for_question("q51_1_W2025")          # 버스 인프라 문항
     assert items[0]["doc_id"] == "R01" and items[0]["synthetic"] is True
     assert items[0]["title"].startswith("[시연용 가상 문서]") and items[0]["pages"] == 2
+    assert items[0]["summary"] == "버스 인프라에 대한 인식을 다룬다."
     assert report_index.for_question("q189_W2025")[0]["doc_id"] == "R02"     # 경제·사회적 위치 문항
     assert report_index.for_question("q183_W2025")[0]["doc_id"] == "R03"     # 반려동물 문항
     assert report_index.for_question("q183_W2025")[0]["synthetic"] is False  # 표시가 없는 제목은 실제 문서로 본다

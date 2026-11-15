@@ -1,4 +1,15 @@
-import type { ChatStatus, CompareKey, Meta, PanelState, Prediction, QuestionSummary, Scenario } from "./types";
+import type {
+  ChatStatus,
+  CompareKey,
+  ContextItem,
+  ContextResult,
+  Meta,
+  PanelState,
+  Prediction,
+  QuestionSummary,
+  Report,
+  Scenario,
+} from "./types";
 
 async function get<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -18,6 +29,17 @@ export const fetchMeta = () => get<Meta>("/api/meta");
 export const fetchQuestions = () => get<QuestionSummary[]>("/api/questions");
 export const fetchScenarios = () => get<Scenario[]>("/api/scenarios");
 export const fetchChatStatus = () => get<ChatStatus>("/api/chat/status");
+export const fetchReport = (docId: string) => get<Report>(`/api/reports/${encodeURIComponent(docId)}`);
+
+/** 문항과 관련된 참고 문서. 참고 문서가 연결되지 않았거나 실패하면 빈 목록으로 본다 (그 영역을 그리지 않는다). */
+export async function fetchContext(qkey: string): Promise<ContextItem[]> {
+  try {
+    const r = await get<ContextResult>(`/api/context?qkey=${encodeURIComponent(qkey)}`);
+    return r.available ? r.items : [];
+  } catch {
+    return [];
+  }
+}
 
 const cache = new Map<string, Prediction>();
 const key = (s: PanelState) => `${s.qkey}|${s.attribute}|${s.adapter}`;
@@ -43,6 +65,8 @@ export type ChatEvent =
   | { type: "status"; tool: string; text: string }
   | { type: "text"; delta: string }
   | { type: "panel"; state: PanelState; compare: "actual" | CompareKey; prediction: Prediction }
+  | { type: "context"; qkey: string | null; query: string; items: ContextItem[] }
+  | { type: "saved"; saved_at: string; model: string }
   | { type: "done"; stop_reason: string }
   | { type: "error"; code: string; message: string };
 
@@ -51,12 +75,14 @@ export async function streamChat(
   messages: { role: "user" | "assistant"; content: string }[],
   panel: PanelState | null,
   onEvent: (e: ChatEvent) => void,
+  /** 추천 질문 버튼으로 보낸 경우 그 시나리오의 id. 대화 모델을 쓸 수 없을 때 서버가 저장된 답변을 찾는 데 쓴다 */
+  scenarioId?: string,
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, panel }),
+    body: JSON.stringify(scenarioId ? { messages, panel, scenario_id: scenarioId } : { messages, panel }),
     signal,
   });
   if (!res.ok || !res.body) {

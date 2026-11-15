@@ -107,10 +107,15 @@ p {
 
 /* ---- 틀 ------------------------------------------------------------- */
 
+/* 기본은 채팅 하나다. '자세히 보기'를 누르면 오른쪽에 상세 패널이 열려 둘로 나뉜다. */
 .app {
   display: grid;
-  grid-template-columns: clamp(330px, 25vw, 430px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   height: 100vh;
+}
+
+.app.has-detail {
+  grid-template-columns: clamp(340px, 26vw, 440px) minmax(0, 1fr);
   min-width: 1120px;
 }
 
@@ -312,295 +317,7 @@ p {
   color: var(--ink-2);
 }
 
-/* ---- 채팅 ------------------------------------------------------------ */
-
-.chat {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--surface);
-  border-right: 1px solid var(--line);
-}
-
-.chat-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px 12px 18px;
-  border-bottom: 1px solid var(--line);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
-}
-
-.brand-name {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.brand-sub {
-  color: var(--ink-3);
-  font-size: 12px;
-}
-
-.chat-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 18px 18px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.chat-intro {
-  margin-top: 4px;
-}
-
-.intro-lead {
-  font-size: 17px;
-  font-weight: 650;
-  line-height: 1.4;
-  letter-spacing: -0.01em;
-}
-
-.intro-sub {
-  margin-top: 8px;
-  color: var(--ink-2);
-  font-size: 13px;
-}
-
-.intro-cards {
-  display: grid;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.intro-card {
-  display: grid;
-  gap: 2px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  background: var(--surface);
-  text-align: left;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.intro-card:hover:not(:disabled) {
-  background: var(--surface-2);
-  border-color: var(--line-2);
-}
-
-.intro-title {
-  color: var(--accent-ink);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.intro-prompt {
-  font-size: 13.5px;
-  line-height: 1.4;
-}
-
-.msg {
-  display: flex;
-}
-
-.msg-user {
-  justify-content: flex-end;
-}
-
-.bubble {
-  max-width: 88%;
-  padding: 9px 13px;
-  border-radius: 14px 14px 4px 14px;
-  background: var(--accent-soft);
-  white-space: pre-wrap;
-}
-
-.answer {
-  max-width: 100%;
-  min-width: 0;
-}
-
-.md p {
-  margin: 0 0 8px;
-}
-
-.md p:last-child,
-.md ul:last-child {
-  margin-bottom: 0;
-}
-
-.md ul {
-  margin: 0 0 8px;
-  padding-left: 18px;
-}
-
-.md li {
-  margin: 2px 0;
-}
-
-.msg-status {
-  color: var(--ink-3);
-  font-size: 12.5px;
-  margin-bottom: 4px;
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-.msg-notice {
-  padding: 8px 11px;
-  border: 1px dashed var(--line-2);
-  border-radius: 10px;
-  color: var(--ink-2);
-  font-size: 12.5px;
-}
-
-.md + .msg-notice {
-  margin-top: 8px;
-}
-
-.revisit {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 8px;
-  padding: 3px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ink-2);
-  font-size: 12px;
-}
-
-.revisit:hover {
-  background: var(--surface-2);
-  color: var(--ink);
-}
-
-.typing {
-  display: inline-flex;
-  gap: 4px;
-  padding: 6px 0;
-}
-
-.typing i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ink-3);
-  animation: pulse 1s ease-in-out infinite;
-}
-
-.typing i:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.typing i:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-.chat-foot {
-  padding: 10px 16px 12px;
-  border-top: 1px solid var(--line);
-}
-
-.quick {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.composer {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 7px 7px 7px 13px;
-  border: 1px solid var(--line-2);
-  border-radius: 14px;
-  background: var(--surface);
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.composer:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.composer textarea {
-  flex: 1;
-  min-height: 24px;
-  padding: 3px 0;
-  border: 0;
-  outline: 0;
-  resize: none;
-  background: transparent;
-  line-height: 1.5;
-}
-
-.composer textarea::placeholder {
-  color: var(--ink-3);
-}
-
-.send {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
-}
-
-.chat-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  color: var(--ink-3);
-  font-size: 11.5px;
-}
-
-.chat-status i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  border: 1.5px solid var(--ink-3);
-}
-
-.chat-status.is-on i {
-  border: 0;
-  background: #0ca30c;
-}
+/* 채팅·결과 카드·참고 문서의 스타일은 chat.css에 있다. */
 
 /* ---- 결과 패널 -------------------------------------------------------- */
 
@@ -955,6 +672,13 @@ p {
   font-size: 12px;
 }
 
+/* 집단이 3개뿐이거나 집단 차이가 아주 작을 때: 상관을 확신처럼 보이지 않게 작게 쓴다 */
+.stat-value.is-weak {
+  color: var(--ink-3);
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .spread {
   display: grid;
   gap: 4px;
@@ -1136,7 +860,7 @@ p {
   display: flex;
   align-items: center;
   gap: 4px 12px;
-  height: 30px;
+  min-height: 30px;
   margin-left: 56px;
   color: var(--ink-2);
   font-size: 12px;
@@ -1159,9 +883,12 @@ p {
 
 .legend-end {
   min-width: 0;
+  /* 긴 보기 문구는 말줄임하지 않고 두 줄로 쓴다 */
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .legend-mid {
@@ -1170,7 +897,7 @@ p {
 }
 
 .axis {
-  height: 30px;
+  min-height: 30px;
   margin-right: 68px;
   display: flex;
   flex-direction: column;
@@ -1190,9 +917,15 @@ p {
 .axis-ends span {
   min-width: 0;
   max-width: 50%;
+  /* 긴 보기 문구는 말줄임하지 않고 두 줄로 쓴다 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.axis-ends span:last-child {
+  text-align: right;
 }
 
 .axis-ticks {
@@ -1647,38 +1380,6 @@ p {
   margin-top: 8px;
   color: var(--ink-3);
   font-size: 12px;
-}
-
-/* ③ 참고 맥락 */
-.context {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 9px 16px;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--radius);
-  color: var(--ink-3);
-  font-size: 12.5px;
-}
-
-.context svg {
-  flex: none;
-  margin-top: 2px;
-}
-
-.context strong {
-  color: var(--ink-2);
-  font-weight: 650;
-}
-
-.context-rule {
-  margin-left: 8px;
-  padding: 1px 7px;
-  border-radius: 6px;
-  background: var(--surface-3);
-  color: var(--ink-2);
-  font-size: 11.5px;
-  font-weight: 600;
 }
 
 /* ---- 문항 고르기 ------------------------------------------------------ */

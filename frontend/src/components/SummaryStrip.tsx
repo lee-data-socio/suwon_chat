@@ -1,5 +1,5 @@
 import type { Prediction } from "../types";
-import { metricName, num, signed } from "../lib/format";
+import { corr, metricName, num } from "../lib/format";
 import { adapterLabel, adapterShort, REFERENCE_ID } from "../lib/labels";
 import { Hint } from "./Tooltip";
 
@@ -59,6 +59,10 @@ export function SummaryStrip({ p }: { p: Prediction }) {
   const unitText = (v: number | null) =>
     v == null ? "–" : q.scale_type === "순서형" ? `${v.toFixed(2)}점` : `${(v * 100).toFixed(1)}%p`;
   const spreadTop = Math.max(s.spread_predicted ?? 0, s.spread_actual ?? 0, 0.0001);
+  // 실제 집단 차이가 아주 작으면(순서형 0.1점, 이분형 3%p 미만) 높낮이 순서는 우연에 가깝다.
+  // 집단이 3개뿐이어도 상관은 쉽게 ±1이 된다. 두 경우 모두 상관을 확신처럼 보이지 않게 한다.
+  const tinySpread = s.spread_actual != null && s.spread_actual < (q.scale_type === "순서형" ? 0.1 : 0.03);
+  const weakOrder = tinySpread || p.groups.length <= 3;
 
   return (
     <section className="summary" aria-label="오차 요약">
@@ -112,15 +116,21 @@ export function SummaryStrip({ p }: { p: Prediction }) {
           <div className="groups-stats">
             <Hint
               className="stat"
-              text="집단별 예측 평균과 실측 평균의 상관. +1이면 높낮이 순서가 실제와 같고, 0 근처나 음수이면 순서를 믿기 어렵다."
+              text="집단별 예측 평균과 실측 평균의 상관. +1에 가까우면 높낮이 순서가 실제와 같고, 0 근처나 음수이면 순서를 믿기 어렵다. 집단이 적거나 집단 차이가 작으면 우연히도 크게 나온다."
             >
-              <span className="stat-name">높낮이 일치</span>
+              <span className="stat-name">높낮이 일치 · 집단 {p.groups.length}개</span>
               {s.order_corr == null ? (
                 <span className="stat-note">집단이 2개라 계산하지 않는다</span>
               ) : (
                 <>
-                  <strong className="stat-value">{signed(s.order_corr)}</strong>
-                  <span className="stat-note">{corrWords(s.order_corr)}</span>
+                  <strong className={`stat-value${weakOrder ? " is-weak" : ""}`}>{corr(s.order_corr)}</strong>
+                  <span className="stat-note">
+                    {tinySpread
+                      ? "집단 차이가 아주 작아 방향을 따지지 않는다"
+                      : p.groups.length <= 3
+                        ? "집단이 3개뿐이라 참고만 한다"
+                        : corrWords(s.order_corr)}
+                  </span>
                 </>
               )}
             </Hint>

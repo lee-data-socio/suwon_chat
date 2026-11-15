@@ -124,17 +124,54 @@ export interface ChatStatus {
   reason: string | null;
 }
 
+/** 참고 문서에서 찾은 대목 하나. 예측에 쓰이지 않은 자료다. */
+export interface ContextItem {
+  doc_id: string;
+  title: string;
+  page: number;
+  pages: number;
+  /** 문서 전체의 한두 문장 요약 */
+  summary?: string;
+  /** 찾아낸 쪽의 대목 */
+  text: string;
+  score: number;
+  /** 시연용으로 만든 가상 문서 */
+  synthetic: boolean;
+}
+
+export interface ContextResult {
+  available: boolean;
+  query: string;
+  items: ContextItem[];
+}
+
+export interface Report {
+  doc_id: string;
+  title: string;
+  summary: string;
+  synthetic: boolean;
+  pages: { page: number; text: string }[];
+}
+
+/** 답변은 글과 결과 카드가 도착한 순서대로 놓인다. */
+export type MessagePart =
+  | { kind: "text"; text: string }
+  | { kind: "card"; state: PanelState; compare: CompareKey | null };
+
 export interface ChatMessage {
   id: number;
   role: "user" | "assistant";
+  /** 글만 이은 것. 다음 질문 때 대화 모델에 넘긴다 */
   content: string;
+  parts: MessagePart[];
   /** 답변이 오는 중 */
   pending?: boolean;
   /** 도구 진행 표시 ("예측을 불러오는 중") */
   status?: string;
   /** 답변 대신 보이는 안내 (연결 안 됨, 오류) */
   notice?: string;
-  /** 이 답변이 패널에 띄운 상태. 누르면 다시 볼 수 있다 */
-  panel?: PanelState;
-  compare?: CompareKey[];
+  /** 이 답변에 붙은 참고 문서 */
+  context?: ContextItem[];
+  /** 대화 모델이 지금 쓴 답이 아니라 미리 저장해 둔 답변일 때 */
+  saved?: { saved_at: string; model: string };
 }

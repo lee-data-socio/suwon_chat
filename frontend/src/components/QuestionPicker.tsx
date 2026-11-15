@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import type { AdapterInfo, QuestionSummary, ScaleType } from "../types";
-import { adapterLabel, REFERENCE_ID } from "../lib/labels";
-import { num } from "../lib/format";
 
 interface Props {
   adapters: AdapterInfo[];
@@ -71,7 +69,7 @@ export function QuestionPicker({ adapters, questions, current, onPick, onClose }
           </button>
         </div>
         <div className="picker-count">
-          2025년 문항 {questions.length}개 가운데 {groups.total}개 · 오른쪽 숫자는 {adapterLabel(REFERENCE_ID)}의 평균 오차(작을수록 잘 맞음)
+          2025년 문항 {questions.length}개 가운데 {groups.total}개
         </div>
         <div className="picker-list">
           {groups.list.length === 0 && <p className="picker-empty">맞는 문항이 없습니다.</p>}
@@ -106,7 +104,6 @@ export function QuestionPicker({ adapters, questions, current, onPick, onClose }
                       {q.scale_type}
                       {q.scale_type !== "이분형" && ` ${q.options.length}`}
                     </span>
-                    <span className="picker-error">{num(q.error, 3)}</span>
                   </button>
                 ))}
               </div>

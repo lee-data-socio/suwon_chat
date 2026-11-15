@@ -12,6 +12,7 @@
     GET  /api/chat/status  대화 LLM을 쓸 수 있는지
     POST /api/chat         대화. 응답은 SSE(text/event-stream)이고 이벤트는
                            status {tool,text} · text {delta} · panel {state,compare,prediction} · context {qkey,query,items} · done {stop_reason} · error {code,message}
+                           · saved {saved_at,model} (대화 모델 대신 저장된 답변을 내보낼 때 맨 앞에 온다)
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ from pydantic import BaseModel, Field
 from . import config
 from .chat import chat_status, run_chat
 from .predict import LookupBackend
+from . import saved
 from .reports import LocalEmbedder, ReportIndex
 from .scenarios import SCENARIOS
 from .service import NotFound, Service
@@ -146,6 +148,8 @@ class PanelState(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=400)
     panel: PanelState | None = None
+    # 추천 질문 버튼으로 보낸 질문이면 그 id. 대화 모델을 쓸 수 없을 때 저장된 답변으로 넘어가는 데 쓴다.
+    scenario_id: str | None = Field(default=None, max_length=40)
 
 
 def _valid_panel(panel: PanelState | None) -> dict | None:
@@ -170,24 +174,36 @@ async def chat(req: ChatRequest):
         raise HTTPException(400, "마지막 메시지는 비어 있지 않은 사용자 메시지여야 한다")
     panel = _valid_panel(req.panel)
 
-    async def stream():
-        state = chat_status()
-        if not state["available"]:
-            yield _sse("error", {"code": "no_api_key", "message": "대화 모델이 연결되지 않았습니다. 패널은 그대로 쓸 수 있습니다."})
+    answer = saved.load().get(req.scenario_id) if req.scenario_id else None
+
+    async def live():
+        if not chat_status()["available"]:
+            yield "error", {"code": "no_api_key", "message": "대화 모델이 연결되지 않았습니다. 결과 카드는 그대로 볼 수 있습니다."}
             return
         import anthropic
         # 발표 중에 오래 매달리지 않게 한다. 연결 5초, 응답 60초, 재시도 1번.
         client = anthropic.AsyncAnthropic(timeout=anthropic.Timeout(60.0, connect=5.0), max_retries=1)
         try:
-            async for event, data in run_chat(client, svc(), [m.model_dump() for m in req.messages], panel,
-                                              reports()):
-                yield _sse(event, data)
+            async for item in run_chat(client, svc(), [m.model_dump() for m in req.messages], panel, reports()):
+                yield item
         except Exception:
             # 어떤 실패든 화면이 기다리기만 하지 않도록 error 이벤트로 끝낸다
             log.exception("대화 처리 실패")
-            yield _sse("error", {"code": "server_error", "message": "답변을 만드는 중 문제가 생겼습니다. 패널은 그대로 쓸 수 있습니다."})
+            yield "error", {"code": "server_error", "message": "답변을 만드는 중 문제가 생겼습니다. 결과 카드는 그대로 볼 수 있습니다."}
         finally:
             await client.close()
+
+    async def stream():
+        wrote = False
+        async for event, data in live():
+            # 글을 한 자도 쓰기 전에 대화 모델이 막혔고 저장된 답변이 있으면 그것으로 넘어간다
+            if event == "error" and not wrote and answer and data.get("code") in saved.FALLBACK_CODES:
+                log.warning("대화 모델을 쓸 수 없어 저장된 답변을 내보낸다 (%s, %s)", req.scenario_id, data.get("code"))
+                async for item in saved.replay(answer, svc(), reports()):
+                    yield _sse(*item)
+                return
+            wrote = wrote or event == "text"
+            yield _sse(event, data)
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BookOpen, ChevronDown, Database, Radio, Table2, ZoomIn } from "lucide-react";
+import { ChevronDown, Database, Radio, Table2, X, ZoomIn } from "lucide-react";
 import type { CompareKey, Meta, PanelState, Prediction, QuestionSummary } from "../types";
 import type { Theme } from "../lib/color";
 import { hasLastYear, seriesFor } from "../lib/format";
@@ -24,9 +24,11 @@ interface Props {
   theme: Theme;
   onState: (patch: Partial<PanelState>) => void;
   onCompare: (key: CompareKey) => void;
+  onClose: () => void;
 }
 
-export function ResultPanel({ meta, questions, state, prediction: p, loading, error, compare, theme, onState, onCompare }: Props) {
+/** 상세 패널. 결과 카드의 "자세히 보기"로 열고, 여기서 문항·속성·어댑터를 바꿔 가며 본다. */
+export function ResultPanel({ meta, questions, state, prediction: p, loading, error, compare, theme, onState, onCompare, onClose }: Props) {
   const [picking, setPicking] = useState(false);
   const [table, setTable] = useState(false);
   const [zoom, setZoom] = useState(false);
@@ -37,7 +39,9 @@ export function ResultPanel({ meta, questions, state, prediction: p, loading, er
     <main className="panel" aria-busy={loading}>
       <header className="panel-head">
         <div className="q-block">
-          {p ? (
+          {error ? (
+            <h1 className="q-text q-placeholder">예측을 불러오지 못했습니다</h1>
+          ) : p ? (
             <>
               <div className="q-meta">
                 <span>{p.question.survey_no}</span>
@@ -72,7 +76,7 @@ export function ResultPanel({ meta, questions, state, prediction: p, loading, er
               </h1>
             </>
           ) : (
-            <h1 className="q-text q-placeholder">{error ? "예측을 불러오지 못했습니다" : "불러오는 중"}</h1>
+            <h1 className="q-text q-placeholder">불러오는 중</h1>
           )}
         </div>
         <div className="head-actions">
@@ -89,6 +93,9 @@ export function ResultPanel({ meta, questions, state, prediction: p, loading, er
           </Hint>
           <button className="btn" onClick={() => setPicking(true)}>
             문항 바꾸기 <ChevronDown size={15} aria-hidden />
+          </button>
+          <button className="icon-btn panel-close" onClick={onClose} aria-label="상세 패널 닫기">
+            <X size={18} />
           </button>
         </div>
       </header>
@@ -141,9 +148,10 @@ export function ResultPanel({ meta, questions, state, prediction: p, loading, er
         </div>
       </div>
 
-      {error && !p && <div className="panel-error">{error}</div>}
+      {/* 불러오지 못하면 늘 알린다. 이전 장면의 차트를 그대로 두면 지금 고른 것의 결과처럼 보인다 */}
+      {error && <div className="panel-error">{error}</div>}
 
-      {p && (
+      {p && !error && (
         <div className={`panel-body${loading ? " is-loading" : ""}`}>
           <SummaryStrip p={p} />
 
@@ -210,16 +218,6 @@ export function ResultPanel({ meta, questions, state, prediction: p, loading, er
             </div>
           </section>
 
-          <section className="context" aria-label="참고 맥락">
-            <BookOpen size={16} aria-hidden />
-            <div>
-              <strong>
-                <span className="layer-no">③</span> 참고 맥락
-              </strong>
-              <span className="context-rule">예측에 사용되지 않은 참고 자료</span>
-              <p>참고 문서는 아직 연결되지 않았습니다. 연결하면 이 문항과 관련된 보고서 대목이 문서 이름·쪽수와 함께 여기에 나옵니다.</p>
-            </div>
-          </section>
         </div>
       )}
 

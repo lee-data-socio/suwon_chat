@@ -1,0 +1,214 @@
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Archive, ArrowUp, BarChart3, Moon, Sun } from "lucide-react";
+import type { ChatMessage, ChatStatus, CompareKey, ContextItem, PanelState, Scenario } from "../types";
+import type { Theme } from "../lib/color";
+import { Markdown } from "../lib/markdown";
+import { ContextCards } from "./ContextCards";
+import { ResultCard } from "./ResultCard";
+import { Hint } from "./Tooltip";
+
+interface Props {
+  messages: ChatMessage[];
+  scenarios: Scenario[];
+  status: ChatStatus | null;
+  busy: boolean;
+  theme: Theme;
+  /** 상세 패널이 열려 있다 (채팅 열이 좁아진다) */
+  split: boolean;
+  /** 상세 패널이 보이고 있는 장면 */
+  detailKey: string | null;
+  onToggleTheme: () => void;
+  onSend: (text: string, scenario?: Scenario) => void;
+  onDetail: (state: PanelState, compare: CompareKey | null) => void;
+  onOpenReport: (item: ContextItem) => void;
+}
+
+const keyOf = (s: PanelState) => `${s.qkey}|${s.attribute}|${s.adapter}`;
+
+/** 화면의 중심인 대화 열. 답변 안에 결과 카드와 참고 문서가 들어간다. */
+export function Chat({
+  messages,
+  scenarios,
+  status,
+  busy,
+  theme,
+  split,
+  detailKey,
+  onToggleTheme,
+  onSend,
+  onDetail,
+  onOpenReport,
+}: Props) {
+  const [draft, setDraft] = useState("");
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const stick = useRef(true); // 맨 아래를 보고 있을 때만 새 글을 따라 내려간다
+  const count = messages.length;
+
+  // 새 질문을 보내면 맨 아래로 간다
+  useEffect(() => {
+    stick.current = true;
+  }, [count]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  });
+
+  // 결과 카드가 자료를 받아 커질 때도 따라 내려간다
+  useEffect(() => {
+    const el = scrollRef.current;
+    const inner = el?.firstElementChild;
+    if (!el || !inner) return;
+    const ro = new ResizeObserver(() => {
+      if (stick.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [draft]);
+
+  const submit = () => {
+    const text = draft.trim();
+    if (!text || busy) return;
+    setDraft("");
+    onSend(text);
+  };
+
+  const empty = count === 0;
+
+  return (
+    <section className={`chat${split ? " is-split" : ""}`}>
+      <header className="top">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden>
+            <BarChart3 size={15} />
+          </span>
+          <span className="brand-name">수원서베이 응답 예측</span>
+        </div>
+        <button className="icon-btn" onClick={onToggleTheme} aria-label={theme === "light" ? "어두운 화면으로" : "밝은 화면으로"}>
+          {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
+        </button>
+      </header>
+
+      <div
+        className="chat-scroll"
+        ref={scrollRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
+      >
+        <div className={`chat-col${empty ? " is-empty" : ""}`}>
+          {empty && (
+            <div className="hero">
+              <h1>수원서베이 응답 예측</h1>
+              <p>
+                2023·2024년 수원서베이로 학습한 모델이 2025년 조사 결과를 보지 않고 예측한 응답 분포입니다.
+                <br />
+                문항과 집단을 말하면 예측과 실측을 나란히 보여 드립니다.
+              </p>
+              <div className="intro-cards">
+                {scenarios.map((s) => (
+                  <button key={s.id} className="intro-card" disabled={busy} onClick={() => onSend(s.prompt, s)}>
+                    <span className="intro-title">{s.title}</span>
+                    <span className="intro-prompt">{s.prompt}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((m) =>
+            m.role === "user" ? (
+              <div key={m.id} className="msg msg-user">
+                <div className="bubble">{m.content}</div>
+              </div>
+            ) : (
+              <div key={m.id} className="msg msg-assistant">
+                {m.saved && (
+                  <span
+                    className="saved-badge"
+                    title={`대화 모델이 지금 쓴 답이 아니라 미리 저장해 둔 답변이다 (${m.saved.model}, ${m.saved.saved_at.slice(0, 10)})`}
+                  >
+                    <Archive size={12} aria-hidden /> 저장된 답변
+                  </span>
+                )}
+                {m.parts.map((part, i) =>
+                  part.kind === "text" ? (
+                    <Markdown key={i} text={part.text} />
+                  ) : (
+                    <ResultCard
+                      key={i}
+                      state={part.state}
+                      compare={part.compare}
+                      theme={theme}
+                      compact={split}
+                      active={detailKey === keyOf(part.state)}
+                      onDetail={onDetail}
+                    />
+                  ),
+                )}
+                {m.status && <div className="msg-status">{m.status}…</div>}
+                {m.pending && !m.status && !(m.parts.at(-1)?.kind === "text") && (
+                  <div className="typing" aria-label="답변을 쓰는 중">
+                    <i />
+                    <i />
+                    <i />
+                  </div>
+                )}
+                {m.notice && <div className="msg-notice">{m.notice}</div>}
+                {m.context && m.context.length > 0 && !m.pending && <ContextCards items={m.context} onOpen={onOpenReport} />}
+              </div>
+            ),
+          )}
+        </div>
+      </div>
+
+      <footer className="chat-foot">
+        <div className="chat-col">
+          {!empty && (
+            <div className="quick" aria-label="추천 질문">
+              {scenarios.map((s) => (
+                <Hint key={s.id} text={s.prompt}>
+                  <button className="chip" disabled={busy} onClick={() => onSend(s.prompt, s)}>
+                    {s.title}
+                  </button>
+                </Hint>
+              ))}
+            </div>
+          )}
+          <div className="composer">
+            <textarea
+              ref={inputRef}
+              rows={1}
+              value={draft}
+              placeholder="예: 연령별로 버스 만족도를 보여 줘"
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                // 한글 조합 중의 Enter는 보내지 않는다
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              aria-label="질문 입력"
+            />
+            <button className="send" onClick={submit} disabled={busy || !draft.trim()} aria-label="보내기">
+              <ArrowUp size={17} />
+            </button>
+          </div>
+          {status && !status.available && (
+            <div className="chat-status">대화 모델이 연결되지 않았습니다. 추천 질문의 결과는 볼 수 있습니다.</div>
+          )}
+        </div>
+      </footer>
+    </section>
+  );
+}

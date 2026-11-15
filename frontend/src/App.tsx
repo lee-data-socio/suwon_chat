@@ -1,37 +1,65 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  cachedPrediction,
   fetchChatStatus,
+  fetchContext,
   fetchMeta,
-  fetchPrediction,
   fetchQuestions,
   fetchScenarios,
   storePrediction,
   streamChat,
 } from "./api";
-import type { ChatMessage, ChatStatus, CompareKey, Meta, PanelState, Prediction, QuestionSummary, Scenario } from "./types";
+import type {
+  ChatMessage,
+  ChatStatus,
+  CompareKey,
+  ContextItem,
+  Meta,
+  MessagePart,
+  PanelState,
+  QuestionSummary,
+  Scenario,
+} from "./types";
 import { useTheme } from "./lib/hooks";
 import { REFERENCE_ID, setAdapters } from "./lib/labels";
-import { ChatPane } from "./components/ChatPane";
+import { usePrediction } from "./lib/usePrediction";
+import { Chat } from "./components/Chat";
+import { ReportModal } from "./components/ReportModal";
 import { ResultPanel } from "./components/ResultPanel";
 import { TipProvider } from "./components/Tooltip";
 
 const FALLBACK: PanelState = { qkey: "q189_W2025", attribute: "TENURE", adapter: "exp1" };
 const COMPARE_KEYS: CompareKey[] = ["last_year", "reference", "zero_shot"];
 
-/** 주소의 ?q=&a=&m=&with= 로 패널 상태를 정할 수 있다. 발표 때 장면을 즐겨찾기로 열어 두는 데 쓴다. */
-function fromUrl(): { panel: Partial<PanelState>; compare: CompareKey[] | null } {
+/** 상세 패널이 보이고 있는 장면 */
+interface Detail {
+  state: PanelState;
+  compare: Set<CompareKey>;
+}
+
+const keyOf = (s: PanelState) => `${s.qkey}|${s.attribute}|${s.adapter}`;
+
+/** 주소의 ?q=&a=&m=&with= 로 장면을 열 수 있다. 발표 때 즐겨찾기로 열어 두는 데 쓴다. */
+function fromUrl(): { panel: Partial<PanelState>; compare: CompareKey[] | null } | null {
   const u = new URLSearchParams(window.location.search);
-  const panel: Partial<PanelState> = {};
-  if (u.get("q")) panel.qkey = u.get("q")!;
+  if (!u.get("q")) return null;
+  const panel: Partial<PanelState> = { qkey: u.get("q")! };
   if (u.get("a")) panel.attribute = u.get("a")!;
   if (u.get("m")) panel.adapter = u.get("m")!;
   const withKeys = u.get("with");
-  const compare = withKeys === null ? null : (withKeys.split(",").filter((k) => COMPARE_KEYS.includes(k as CompareKey)) as CompareKey[]);
+  const compare =
+    withKeys === null ? null : (withKeys.split(",").filter((k) => COMPARE_KEYS.includes(k as CompareKey)) as CompareKey[]);
   return { panel, compare };
 }
 
-const NO_CHAT = "대화 모델이 연결되지 않아 답변은 나오지 않습니다.";
+/** 대화에서 마지막으로 보여 준 장면. 다음 질문에서 "속성만 바꿔 줘" 같은 말을 풀 때 대화 모델에 알려 준다. */
+function lastShown(messages: ChatMessage[]): PanelState | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const cards = messages[i].parts.filter((p) => p.kind === "card");
+    const last = cards[cards.length - 1];
+    if (last && last.kind === "card") return last.state;
+  }
+  return null;
+}
 
 export default function App() {
   const [theme, toggleTheme] = useTheme();
@@ -41,19 +69,15 @@ export default function App() {
   const [chatStatus, setChatStatus] = useState<ChatStatus | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
 
-  const [panel, setPanel] = useState<PanelState>(FALLBACK);
-  const [compare, setCompare] = useState<Set<CompareKey>>(new Set());
-  const [prediction, setPrediction] = useState<Prediction | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [panelError, setPanelError] = useState<string | null>(null);
-
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
+  const [detail, setDetail] = useState<Detail | null>(null);
+  const [report, setReport] = useState<ContextItem | null>(null);
   const nextId = useRef(1);
-  const panelRef = useRef(panel);
-  panelRef.current = panel;
-  const compareRef = useRef(compare);
-  compareRef.current = compare;
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
+
+  const { data: prediction, error: panelError, loading } = usePrediction(detail?.state ?? null);
 
   useEffect(() => {
     Promise.all([fetchMeta(), fetchQuestions(), fetchScenarios()])
@@ -62,12 +86,13 @@ export default function App() {
         setMeta(m);
         setQuestions(q);
         setScenarios(s);
-        const first = s.find((x) => x.panel)?.panel;
-        const base = first ? { qkey: first.qkey, attribute: first.attribute, adapter: first.adapter } : FALLBACK;
         const url = fromUrl();
-        setPanel({ ...base, ...url.panel });
-        if (url.compare) setCompare(new Set(url.compare));
-        else if (url.panel.adapter && url.panel.adapter !== REFERENCE_ID) setCompare(new Set(["reference"]));
+        if (url) {
+          // 주소로 열면 상세 패널이 열린 채로 시작한다
+          const state = { ...FALLBACK, ...url.panel };
+          const compare = url.compare ?? (state.adapter !== m.reference_adapter ? ["reference" as const] : []);
+          setDetail({ state, compare: new Set(compare) });
+        }
       })
       .catch((e: Error) => setBootError(e.message));
     fetchChatStatus()
@@ -75,61 +100,41 @@ export default function App() {
       .catch(() => setChatStatus({ available: false, model: "", reason: null }));
   }, []);
 
-  // 패널 상태가 바뀌면 예측을 가져온다. 가져오는 동안에는 이전 차트를 흐리게 둔다.
+  // 상세 패널의 장면을 주소에 적어 둔다. 패널을 닫으면 주소도 비운다.
   useEffect(() => {
     if (!meta) return;
-    const hit = cachedPrediction(panel);
-    if (hit) {
-      setPrediction(hit);
-      setPanelError(null);
-      setLoading(false);
+    if (!detail) {
+      window.history.replaceState(null, "", window.location.pathname);
       return;
     }
-    let alive = true;
-    setLoading(true);
-    fetchPrediction(panel)
-      .then((p) => {
-        if (!alive) return;
-        setPrediction(p);
-        setPanelError(null);
-      })
-      .catch((e: Error) => alive && setPanelError(`예측을 불러오지 못했습니다: ${e.message}`))
-      .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [panel, meta]);
-
-  // 지금 장면을 주소에 적어 둔다 (새로 고치거나 즐겨찾기로 다시 열 수 있다)
-  useEffect(() => {
-    if (!meta) return;
-    const u = new URLSearchParams({ q: panel.qkey, a: panel.attribute, m: panel.adapter });
-    if (compare.size) u.set("with", [...compare].join(","));
+    const u = new URLSearchParams({ q: detail.state.qkey, a: detail.state.attribute, m: detail.state.adapter });
+    if (detail.compare.size) u.set("with", [...detail.compare].join(","));
     window.history.replaceState(null, "", `?${u}`);
-  }, [panel, compare, meta]);
+  }, [detail, meta]);
 
-  /** 패널 상태를 바꾼다. 빼고 학습한 어댑터로 넘어가면 전체 학습 어댑터와 견주는 보기를 함께 켠다. */
-  const applyPanel = useCallback((next: PanelState, nextCompare?: CompareKey[]) => {
-    const prev = panelRef.current;
-    setPanel(next);
-    setCompare((c) => {
-      if (nextCompare) return new Set(nextCompare);
-      if (next.adapter !== REFERENCE_ID && prev.adapter === REFERENCE_ID) return new Set([...c, "reference"]);
-      return c;
+  const openDetail = useCallback((state: PanelState, compare: CompareKey | null) => {
+    setDetail({ state, compare: new Set(compare ? [compare] : []) });
+  }, []);
+
+  /** 상세 패널 안에서 문항·속성·어댑터를 바꾼다. 대화 속 카드는 그대로 둔다. */
+  const patchDetail = useCallback((patch: Partial<PanelState>) => {
+    setDetail((d) => {
+      if (!d) return d;
+      const state = { ...d.state, ...patch };
+      // 빼고 학습한 어댑터로 넘어가면 전체 학습 어댑터와 견주는 보기를 함께 켠다
+      const compare =
+        state.adapter !== REFERENCE_ID && d.state.adapter === REFERENCE_ID ? new Set([...d.compare, "reference" as const]) : d.compare;
+      return { state, compare };
     });
   }, []);
 
-  const patchPanel = useCallback(
-    (patch: Partial<PanelState>) => applyPanel({ ...panelRef.current, ...patch }),
-    [applyPanel],
-  );
-
   const toggleCompare = useCallback((key: CompareKey) => {
-    setCompare((c) => {
-      const n = new Set(c);
-      if (n.has(key)) n.delete(key);
-      else n.add(key);
-      return n;
+    setDetail((d) => {
+      if (!d) return d;
+      const compare = new Set(d.compare);
+      if (compare.has(key)) compare.delete(key);
+      else compare.add(key);
+      return { ...d, compare };
     });
   }, []);
 
@@ -139,89 +144,98 @@ export default function App() {
   const send = useCallback(
     async (text: string, scenario?: Scenario) => {
       if (busy) return;
-      const userMsg: ChatMessage = { id: nextId.current++, role: "user", content: text };
+      const userMsg: ChatMessage = { id: nextId.current++, role: "user", content: text, parts: [] };
       const answerId = nextId.current++;
 
-      // 추천 질문은 패널 상태가 정해져 있다. 대화 모델을 기다리지 않고 바로 띄운다.
-      let shown: PanelState | undefined;
-      let shownCompare: CompareKey[] | undefined;
+      // 추천 질문은 보여 줄 장면이 정해져 있다. 대화 모델을 기다리지 않고 결과 카드를 바로 놓는다.
+      const parts: MessagePart[] = [];
+      let shown: PanelState | null = null;
       if (scenario?.panel) {
-        const { compare: cmp, ...state } = scenario.panel;
+        const { compare, ...state } = scenario.panel;
+        const cmp = compare === "actual" ? null : compare;
         shown = state;
-        shownCompare = cmp === "actual" ? [] : [cmp];
-        applyPanel(state, shownCompare);
+        parts.push({ kind: "card", state, compare: cmp });
+        if (detailRef.current) openDetail(state, cmp); // 상세 패널이 열려 있으면 새 결과를 따라간다
       }
 
-      if (!chatStatus?.available) {
-        setMessages((list) => [
-          ...list,
-          userMsg,
-          {
-            id: answerId,
-            role: "assistant",
-            content: "",
-            notice: shown ? `${NO_CHAT} 오른쪽 패널은 이 질문에 맞춰 바꿨습니다.` : NO_CHAT,
-            panel: shown,
-            compare: shownCompare,
-          },
-        ]);
-        return;
-      }
-
+      // 대화 모델이 연결되지 않았어도 일단 보낸다. 추천 질문은 서버가 저장해 둔 답변으로 답할 수 있다.
       const history = [...messages, userMsg]
         .filter((m) => m.content.trim())
         .map((m) => ({ role: m.role, content: m.content }));
-      setMessages((list) => [
-        ...list,
-        userMsg,
-        { id: answerId, role: "assistant", content: "", pending: true, panel: shown, compare: shownCompare },
-      ]);
+      const current = shown ?? detailRef.current?.state ?? lastShown(messages);
+      setMessages((list) => [...list, userMsg, { id: answerId, role: "assistant", content: "", parts, pending: true }]);
       setBusy(true);
+      let finished = false; // done이나 error를 받았는가
+      let gotContext = false;
       try {
-        await streamChat(history, shown ?? panelRef.current, (e) => {
+        await streamChat(
+          history,
+          current,
+          (e) => {
           switch (e.type) {
             case "status":
-              // 도구를 부르기 전에 쓴 글과 그 뒤에 쓰는 글이 붙지 않게 문단을 나눈다
-              patchMessage(answerId, (m) => ({
-                ...m,
-                status: e.text,
-                content: m.content && !m.content.endsWith("\n\n") ? `${m.content.trimEnd()}\n\n` : m.content,
-              }));
+              patchMessage(answerId, (m) => ({ ...m, status: e.text }));
               break;
             case "text":
-              patchMessage(answerId, (m) => ({ ...m, status: undefined, content: m.content + e.delta }));
+              patchMessage(answerId, (m) => {
+                const next = m.parts.slice();
+                const last = next[next.length - 1];
+                if (last?.kind === "text") next[next.length - 1] = { kind: "text", text: last.text + e.delta };
+                else {
+                  // 카드 뒤에 새로 시작하는 글은 앞의 빈 줄을 뗀다
+                  const t = e.delta.replace(/^\s+/, "");
+                  if (t) next.push({ kind: "text", text: t });
+                }
+                return { ...m, parts: next, status: undefined, content: m.content + e.delta };
+              });
               break;
-            case "panel":
+            case "panel": {
               storePrediction(e.state, e.prediction);
-              {
-                // 대화 모델이 고른 비교 대상을 그대로 켠다. 앞 질문에서 켜 둔 것이 남지 않게 한다.
-                const cmp: CompareKey[] = e.compare === "actual" ? [] : [e.compare];
-                applyPanel(e.state, cmp);
-                patchMessage(answerId, (m) => ({ ...m, panel: e.state, compare: cmp }));
-              }
+              const cmp = e.compare === "actual" ? null : e.compare;
+              patchMessage(answerId, (m) => {
+                const next = m.parts.slice();
+                const at = next.findIndex((p) => p.kind === "card" && keyOf(p.state) === keyOf(e.state));
+                const card: MessagePart = { kind: "card", state: e.state, compare: cmp };
+                if (at >= 0) next[at] = card; // 추천 질문이 먼저 놓은 카드와 같은 장면이면 새로 놓지 않는다
+                else next.push(card);
+                return { ...m, parts: next, status: undefined };
+              });
+              if (detailRef.current) openDetail(e.state, cmp);
+              break;
+            }
+            case "context":
+              gotContext = true;
+              patchMessage(answerId, (m) => ({ ...m, context: e.items }));
+              break;
+            case "saved":
+              patchMessage(answerId, (m) => ({ ...m, saved: { saved_at: e.saved_at, model: e.model } }));
               break;
             case "done":
+              finished = true;
               patchMessage(answerId, (m) => ({ ...m, pending: false, status: undefined }));
               break;
             case "error":
+              finished = true;
               patchMessage(answerId, (m) => ({ ...m, pending: false, status: undefined, notice: e.message }));
               if (e.code === "no_api_key") setChatStatus((s) => (s ? { ...s, available: false } : s));
+              // 설명은 못 받았어도 결과 카드는 이미 놓여 있다. 참고 문서는 화면이 직접 채운다.
+              if (shown && !gotContext)
+                void fetchContext(shown.qkey).then((items) => patchMessage(answerId, (m) => ({ ...m, context: items })));
               break;
           }
-        });
+          },
+          scenario?.id,
+        );
+        // 서버가 끝을 알리지 않고 닫았으면 잘린 답이다. 완성된 답처럼 두지 않는다.
+        if (!finished) patchMessage(answerId, (m) => ({ ...m, notice: "답변이 중간에 끊겼습니다." }));
       } catch {
-        patchMessage(answerId, (m) => ({ ...m, notice: "서버와 연결이 끊겼습니다. 패널은 그대로 쓸 수 있습니다." }));
+        patchMessage(answerId, (m) => ({ ...m, notice: "서버와 연결이 끊겼습니다. 결과 카드는 그대로 볼 수 있습니다." }));
       } finally {
         patchMessage(answerId, (m) => ({ ...m, pending: false, status: undefined }));
         setBusy(false);
       }
     },
-    [busy, chatStatus, messages, applyPanel],
-  );
-
-  const revisit = useCallback(
-    (m: ChatMessage) => m.panel && applyPanel(m.panel, m.compare ?? [...compareRef.current]),
-    [applyPanel],
+    [busy, chatStatus, messages, openDetail],
   );
 
   if (bootError)
@@ -235,34 +249,37 @@ export default function App() {
 
   return (
     <TipProvider>
-      <div className="app">
-        <ChatPane
+      <div className={`app${detail ? " has-detail" : ""}`}>
+        <Chat
           messages={messages}
           scenarios={scenarios}
           status={chatStatus}
           busy={busy}
           theme={theme}
+          split={detail !== null}
+          detailKey={detail ? keyOf(detail.state) : null}
           onToggleTheme={toggleTheme}
           onSend={send}
-          onRevisit={revisit}
+          onDetail={openDetail}
+          onOpenReport={setReport}
         />
-        {meta ? (
+        {detail && meta && (
           <ResultPanel
             meta={meta}
             questions={questions}
-            state={panel}
+            state={detail.state}
             prediction={prediction}
             loading={loading}
             error={panelError}
-            compare={compare}
+            compare={detail.compare}
             theme={theme}
-            onState={patchPanel}
+            onState={patchDetail}
             onCompare={toggleCompare}
+            onClose={() => setDetail(null)}
           />
-        ) : (
-          <main className="panel panel-boot">불러오는 중</main>
         )}
       </div>
+      {report && <ReportModal item={report} onClose={() => setReport(null)} />}
     </TipProvider>
   );
 }

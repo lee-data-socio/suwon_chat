@@ -94,7 +94,8 @@ export function BinaryChart({ p, series }: { p: Prediction; series: SeriesDef[] 
                       {v != null && (
                         <>
                           <div className={`share-bar series-${s.key}`} style={{ width: `${v * 100}%` }} />
-                          <span className="share-value" style={{ left: `${v * 100}%`, fontSize: Math.min(12, sizes[si].font + 0.5) }}>
+                          {/* 줄이 좁으면 견주는 줄의 숫자는 뺀다 (위아래 숫자가 겹친다). 말풍선에는 나온다 */}
+                          <span className="share-value" hidden={!isMain(s.key) && sizes[si].line < 12} style={{ left: `${v * 100}%`, fontSize: Math.min(12, sizes[si].font + 0.5) }}>
                             {pct(v, 1)}
                           </span>
                         </>

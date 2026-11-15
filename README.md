@@ -18,6 +18,7 @@ cp .env.example .env               # ANTHROPIC_API_KEY를 채운다. 없어도 �
 ```bash
 cd backend
 python -m suwon_chat.build_index   # 정리본 → data/suwon.db. 끝에 자체 점검을 돈다
+python -m suwon_chat.reports       # reports/*.md → 참고 문서 색인. 처음 한 번은 임베딩 모델(약 470MB)을 내려받는다
 python -m uvicorn suwon_chat.api:app --port 8000
 ```
 
@@ -51,6 +52,25 @@ python -m pytest -q tests
 python scripts/check_answers.py 3  # 추천 질문을 3번씩 돌려 답변 속 숫자가 도구 결과에 있는 값인지 본다 (요금이 든다)
 ```
 
+## 참고 문서
+
+`reports/*.md`는 시연용으로 만든 가상 보고서다. 숫자는 2023·2024년 수원서베이 실측에서만 가져왔고, 예측에는 쓰이지 않는다.
+
+- 형식: 머리말(`id`, `title`, `summary`, `topics`)과 `<!-- page N -->`으로 나눈 쪽. 제목이 `[시연용 가상 문서]`로 시작하면 화면에 가상 문서로 표시된다.
+- 문서를 고치거나 더하면 `python -m suwon_chat.reports`로 색인을 다시 만들고 서버를 다시 켠다.
+- 검색은 로컬 임베딩 모델(`intfloat/multilingual-e5-small`)로 한다. 유사도가 0.87보다 낮으면 관련 문서가 없다고 보고 띄우지 않는다(`backend/suwon_chat/reports.py`의 `MIN_SCORE`).
+- 가상 보고서를 쓸 때는 `python scripts/stats_2324.py`로 숫자를 찾는다. 2025년 자료는 보여 주지 않는다.
+
+## 저장된 답변
+
+대화 모델을 쓸 수 없을 때(키 없음, 인터넷 끊김) 추천 질문은 `backend/suwon_chat/saved_answers.json`의 글을 대신 내보내고 화면에 "저장된 답변"이라고 표시한다. 차트와 참고 문서는 그때 다시 계산한다.
+
+```bash
+python scripts/save_answers.py     # 추천 질문을 실제로 돌려 새로 저장한다 (요금이 든다). 저장한 뒤 사람이 읽고 고친다
+```
+
+끊긴 상황을 미리 보려면 `ANTHROPIC_BASE_URL=http://127.0.0.1:9 scripts/serve.sh 8001`로 서버를 하나 더 띄운다.
+
 ## 설정
 
 | 환경 변수 | 기본값 | 뜻 |
@@ -60,6 +80,7 @@ python scripts/check_answers.py 3  # 추천 질문을 3번씩 돌려 답변 속 
 | `CHAT_EFFORT` | `low` | 사고 깊이 (`low` · `medium` · `high`) |
 | `SUWON_SOURCE_DIR` | `./수원서베이_학습결과_정리본` | 원본 자료 폴더 |
 | `SUWON_DB_PATH` | `./data/suwon.db` | 색인 DB |
+| `SUWON_REPORTS_DIR` | `./reports` | 참고 문서 폴더 |
 
 ## 폴더
 
@@ -71,9 +92,12 @@ backend/suwon_chat/
   predict.py       예측 백엔드 (지금은 저장된 예측을 조회하는 것 하나)
   service.py       화면과 대화 LLM에 줄 자료. 화면의 숫자는 모두 여기서 나온다
   scenarios.json   추천 질문 (이 파일만 고치면 버튼이 바뀐다)
+  reports.py       참고 문서 색인과 검색 (로컬 임베딩)
+  saved.py         저장된 답변 내보내기,  saved_answers.json  저장된 답변
   chat.py          대화 LLM (Claude API)과 도구
   api.py           앱 서버
 frontend/src/      화면 (React + TypeScript). 차트는 라이브러리 없이 직접 그렸다
-scripts/           서버 실행, 답변 확인
+reports/           시연용 가상 보고서 12편
+scripts/           서버 실행, 답변 확인·저장, 2023·2024년 실측 조회
 docs/PRD.md        요구사항
 ```

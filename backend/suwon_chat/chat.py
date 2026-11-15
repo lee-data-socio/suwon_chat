@@ -201,7 +201,7 @@ def _run_tool(service: Service, reports, name: str, args: dict) -> tuple[dict, l
         items = reports.search(query)
         result = {"안내": "아래는 참고 문서에서 찾은 대목이다. 예측에 쓰이지 않은 자료다. 가상_문서가 참이면 시연용으로 만든 문서다.",
                   "결과": [{"문서_제목": it["title"], "쪽": it["page"], "가상_문서": it["synthetic"],
-                           "본문": plain(it["text"])} for it in items]}
+                           "문서_요약": it["summary"], "본문": plain(it["text"])} for it in items]}
         return result, [("context", {"qkey": None, "query": query, "items": items})]
     raise NotFound(f"없는 도구: {name}")
 

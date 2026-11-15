@@ -111,3 +111,77 @@ def test_meta_names_the_reference_adapter(client):
     assert meta["reference_adapter"] == "exp1"
     p = client.get("/api/prediction", params={"qkey": "q189_W2025", "attribute": "AGE", "adapter": "exp2"}).json()
     assert p["groups"][0]["reference"]["label"] == "전체 학습 어댑터"
+
+
+# ---- 저장된 답변 ----------------------------------------------------------------
+SAVED = {"S1": {"text": "저장해 둔 답변입니다. 자가 집단의 예측이 실측과 가깝습니다.", "saved_at": "2026-11-15", "model": "claude-haiku-5-5",
+                "panel": {"qkey": "q189_W2025", "attribute": "TENURE", "adapter": "exp1", "compare": "actual"}},
+         "S5": {"text": "교차 집단은 예측하지 못합니다.", "saved_at": "2026-11-15", "model": "claude-haiku-5-5", "panel": None}}
+
+
+def _events(text):
+    import json
+    out, name = [], None
+    for line in text.splitlines():
+        if line.startswith("event: "):
+            name = line[7:]
+        elif line.startswith("data: "):
+            out.append((name, json.loads(line[6:])))
+    return out
+
+
+@pytest.fixture()
+def saved_answers(monkeypatch):
+    monkeypatch.setattr(api.saved, "load", lambda: SAVED)
+    monkeypatch.setattr(api.saved, "DELAY", 0)
+
+
+def test_saved_answer_is_replayed_when_chat_is_not_connected(client, saved_answers):
+    body = {"messages": [{"role": "user", "content": "점유형태별로 보여 줘"}], "scenario_id": "S1"}
+    events = _events(client.post("/api/chat", json=body).text)
+    names = [e for e, _ in events]
+    assert names[0] == "saved" and names[1:3] == ["panel", "context"] and names[-1] == "done"
+    assert "".join(d["delta"] for e, d in events if e == "text") == SAVED["S1"]["text"]
+    panel = dict(events)["panel"]
+    assert panel["state"] == {"qkey": "q189_W2025", "attribute": "TENURE", "adapter": "exp1"}
+    assert panel["prediction"]["summary"]["error"] == pytest.approx(0.0363, abs=1e-4)     # 차트 자료는 지금 자료로 다시 계산한다
+    assert dict(events)["done"] == {"stop_reason": "saved"}
+
+
+def test_saved_answer_without_panel_is_text_only(client, saved_answers):
+    body = {"messages": [{"role": "user", "content": "30대 여성은?"}], "scenario_id": "S5"}
+    assert [e for e, _ in _events(client.post("/api/chat", json=body).text)][:2] == ["saved", "text"]
+
+
+def test_no_fallback_for_free_questions_or_unknown_scenarios(client, saved_answers):
+    for extra in ({}, {"scenario_id": "S99"}):
+        events = _events(client.post("/api/chat", json={"messages": [{"role": "user", "content": "질문"}], **extra}).text)
+        assert [e for e, _ in events] == ["error"] and events[0][1]["code"] == "no_api_key"
+
+
+def test_saved_answer_replaces_a_failed_connection_but_not_a_half_written_answer(client, saved_answers, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    body = {"messages": [{"role": "user", "content": "질문"}], "scenario_id": "S1"}
+
+    async def offline(client, service, history, panel, reports=None):
+        yield "error", {"code": "connection", "message": "연결 실패"}
+    monkeypatch.setattr(api, "run_chat", offline)
+    assert [e for e, _ in _events(client.post("/api/chat", json=body).text)][0] == "saved"
+
+    async def cut_midway(client, service, history, panel, reports=None):
+        yield "text", {"delta": "쓰다가"}
+        yield "error", {"code": "connection", "message": "연결 실패"}
+    monkeypatch.setattr(api, "run_chat", cut_midway)
+    names = [e for e, _ in _events(client.post("/api/chat", json=body).text)]
+    assert names == ["text", "error"]            # 이미 쓴 글 뒤에 저장된 답변을 이어 붙이지 않는다
+
+    async def refused(client, service, history, panel, reports=None):
+        yield "error", {"code": "refusal", "message": "답하지 못함"}
+    monkeypatch.setattr(api, "run_chat", refused)
+    assert [e for e, _ in _events(client.post("/api/chat", json=body).text)] == ["error"]   # 거절은 연결 문제가 아니다
+
+    async def works(client, service, history, panel, reports=None):
+        yield "text", {"delta": "실제 답변"}
+        yield "done", {"stop_reason": "end_turn"}
+    monkeypatch.setattr(api, "run_chat", works)
+    assert [e for e, _ in _events(client.post("/api/chat", json=body).text)] == ["text", "done"]   # 될 때는 실제 답변

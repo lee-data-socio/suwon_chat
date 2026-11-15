@@ -26,7 +26,7 @@ TOP_K = 3
 MAX_PER_DOC = 2          # 한 문서에서 너무 많이 뽑히지 않게 한다
 # 관련 없는 문서를 억지로 띄우지 않기 위한 문턱. 이 임베딩 모델은 무관한 글끼리도 0.8 안팎이 나온다.
 # 값은 색인한 문서로 문항 113개의 검색 결과를 훑어보고 정했다 (README의 "참고 문서" 절).
-MIN_SCORE = 0.86         # 이보다 낮으면 관련 문서가 없다고 본다
+MIN_SCORE = 0.87         # 이보다 낮으면 관련 문서가 없다고 본다 (0.857~0.869 구간은 무관한 문서가 절반쯤 섞였다)
 MARGIN = 0.025           # 1등과 이만큼 넘게 벌어진 대목은 버린다
 PAGE_MARK = re.compile(r"^<!--\s*page\s+(\d+)\s*-->\s*$", re.M)
 SYNTHETIC_TAG = "[시연용 가상 문서]"
@@ -194,7 +194,8 @@ class ReportIndex:
         chunk = self.chunks[i]
         doc = self.documents[chunk["doc_id"]]
         page = next(p for p in doc["pages"] if p["page"] == chunk["page"])
-        return {"doc_id": doc["doc_id"], "title": doc["title"], "page": chunk["page"], "pages": len(doc["pages"]),
+        return {"doc_id": doc["doc_id"], "title": doc["title"], "summary": doc["summary"],
+                "page": chunk["page"], "pages": len(doc["pages"]),
                 "text": page["text"], "score": round(score, 4), "synthetic": doc["synthetic"]}
 
     def _keep(self, ranked: list) -> list[dict]:

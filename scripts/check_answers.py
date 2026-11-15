@@ -15,13 +15,17 @@ from suwon_chat.scenarios import SCENARIOS
 
 st = Store(); sv = Service(st, LookupBackend(st))
 ROUNDS = int(sys.argv[1]) if len(sys.argv) > 1 else 3
-NUM = re.compile(r"-?\d+(?:\.\d+)?")
+NUM = re.compile(r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?")   # 1,741처럼 쉼표가 든 수도 하나로 읽는다
+
+
+def num(text: str) -> float:
+    return round(abs(float(text.replace(",", ""))), 6)
 
 def numbers_in(obj, out):
     if isinstance(obj, bool) or obj is None: return
     if isinstance(obj, (int, float)): out.add(round(abs(float(obj)), 6))
     elif isinstance(obj, str):
-        for m in NUM.findall(obj): out.add(round(abs(float(m)), 6))
+        for m in NUM.findall(obj): out.add(num(m))
     elif isinstance(obj, dict):
         for k, v in obj.items(): numbers_in(k, out); numbers_in(v, out)
     elif isinstance(obj, list):
@@ -57,7 +61,7 @@ for rnd in range(1, ROUNDS + 1):
         text, panels, errors = ask(s["prompt"])
         allowed = set()
         for state, _ in panels: allowed |= allowed_for(sv.prediction_brief(**state))
-        found = [round(abs(float(m)), 6) for m in NUM.findall(text)]
+        found = [num(m) for m in NUM.findall(text)]
         unknown = sorted({v for v in found if v not in allowed}) if panels else []
         want = s["panel"]
         got = panels[-1] if panels else None

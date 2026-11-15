@@ -14,6 +14,9 @@ from suwon_chat.service import Service
 from suwon_chat.scenarios import SCENARIOS
 
 st = Store(); sv = Service(st, LookupBackend(st))
+from suwon_chat import config
+from suwon_chat.reports import ReportIndex
+reports = ReportIndex(config.REPORTS_INDEX, config.REPORTS_VECTORS)
 ROUNDS = int(sys.argv[1]) if len(sys.argv) > 1 else 3
 NUM = re.compile(r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?")   # 1,741처럼 쉼표가 든 수도 하나로 읽는다
 
@@ -60,7 +63,12 @@ for rnd in range(1, ROUNDS + 1):
     for s in SCENARIOS:
         text, panels, errors = ask(s["prompt"])
         allowed = set()
-        for state, _ in panels: allowed |= allowed_for(sv.prediction_brief(**state))
+        for state, _ in panels:
+            allowed |= allowed_for(sv.prediction_brief(**state))
+            # 답변은 참고 문서의 숫자(2023·2024년 조사 값)도 인용한다. 그 문항에 붙는 문서에 있는 숫자를 허용한다
+            for doc_id in {it["doc_id"] for it in reports.for_question(state["qkey"])}:
+                pages = {"p": [p["text"] for p in reports.document(doc_id)["pages"]], "s": reports.document(doc_id)["summary"]}
+                numbers_in(pages, allowed)
         found = [num(m) for m in NUM.findall(text)]
         unknown = sorted({v for v in found if v not in allowed}) if panels else []
         want = s["panel"]

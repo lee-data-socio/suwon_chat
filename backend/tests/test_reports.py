@@ -111,9 +111,27 @@ def test_prediction_is_followed_by_context_for_that_question(service, report_ind
     assert [e for e, _ in events] == ["status", "panel", "context", "text", "done"]
     ctx = dict(events)["context"]
     assert ctx["qkey"] == "q51_1_W2025" and ctx["items"][0]["doc_id"] == "R01"
-    # 참고 문서는 화면으로만 간다. 대화 모델이 받은 도구 결과에는 없다.
-    result = client.calls[1]["messages"][-1]["content"][0]["content"]
-    assert "가상 문서" not in result and "R01" not in result
+    # 대화 모델도 그 문서를 통째로 받아 수치의 해석에 인용한다
+    result = json.loads(client.calls[1]["messages"][-1]["content"][0]["content"])
+    docs = result["참고_문서"]
+    assert [d["제목"] for d in docs] == ["대중교통 인프라와 버스 만족도"]            # 가상 문서 표시는 뗀 제목
+    assert docs[0]["가상_문서"] is True and [p["쪽"] for p in docs[0]["쪽"]] == [1, 2]
+    assert "점유형태에 따라" in docs[0]["쪽"][1]["본문"]                             # 찾은 쪽만이 아니라 문서 전체
+    assert result["평균_오차"] is not None                                          # 예측 요약은 그대로 있다
+
+
+def test_no_documents_means_no_interpretation_material(service, report_index, tmp_path):
+    from suwon_chat.reports import ReportIndex
+    args = {"qkey": "q51_1_W2025", "attribute": "TENURE", "adapter": "exp1", "compare": "actual"}
+    strict = ReportIndex.__new__(ReportIndex)
+    strict.__dict__.update(report_index.__dict__)
+    strict.by_question = {}                                                        # 이 문항을 다룬 문서가 없다
+    client = FakeClient([{"tools": [("get_prediction", args)], "stop": "tool_use"}, {"text": ["답."]}])
+    collect(client, service, [{"role": "user", "content": "버스"}], reports=strict)
+    assert json.loads(client.calls[1]["messages"][-1]["content"][0]["content"])["참고_문서"] == []
+    client = FakeClient([{"tools": [("get_prediction", args)], "stop": "tool_use"}, {"text": ["답."]}])
+    collect(client, service, [{"role": "user", "content": "버스"}])                 # 참고 문서가 연결되지 않았다
+    assert "참고_문서" not in json.loads(client.calls[1]["messages"][-1]["content"][0]["content"])
 
 
 def test_search_reports_tool_returns_passages_and_shows_them(service, report_index):
@@ -132,7 +150,8 @@ def test_report_tool_and_rules_exist_only_when_reports_are_connected(service, re
     from suwon_chat.chat import system_prompt, tools
     names = lambda r: [t["name"] for t in tools(service, r)]
     assert "search_reports" in names(report_index)
-    assert "참고 문서는 예측의 근거가 아니다" in system_prompt(service, report_index)
+    prompt = system_prompt(service, report_index)
+    assert "수치를 말한 뒤 참고 문서로 해석을 붙인다" in prompt and "모델은 문서를 본 적이 없으므로" in prompt
     off = ReportIndex(tmp_path / "x.json", tmp_path / "x.npy")
     assert "search_reports" not in names(off) and "search_reports" not in names(None)
     assert "아직 연결되지 않았다" in system_prompt(service, off)

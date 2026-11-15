@@ -62,13 +62,70 @@ def _free_gb(device: str) -> float | None:
     return None
 
 
-class LiveBackend:
+class InferenceBackend:
+    """모델을 직접 돌리는 백엔드의 공통 부분: 프롬프트 만들기, 어댑터별 실행, 결과 기억해 두기.
+
+    하위 클래스는 `load()`와 `_forward_with(adapter, prompts, n_options)`를 채운다.
+    """
     source = "live"
+    store: Store
+    adapter_names: list[str]
+
+    def _init_common(self, store: Store) -> None:
+        self.store = store
+        self._lock = threading.Lock()
+        self._cache: dict[tuple, list[list[float]]] = {}
+
+    def load(self) -> None:
+        raise NotImplementedError
+
+    def _forward_with(self, adapter: str, prompts: list[str], n_options: int) -> list[list[float]]:
+        """어댑터 하나(BASE면 학습 전 모델)를 끼우고 프롬프트마다 보기 분포를 낸다."""
+        raise NotImplementedError
+
+    def _run(self, key: tuple, adapter: str, prompts: list[str], n_options: int) -> list[list[float]]:
+        """어댑터 하나(또는 학습 전 모델)로 프롬프트들을 돌린다. 같은 요청은 다시 돌리지 않는다."""
+        cache_key = (adapter, *key)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        self.load()
+        with self._lock:          # 어댑터를 바꿔 끼우는 동안 다른 요청이 끼어들지 못하게 한다
+            if cache_key not in self._cache:
+                if adapter != BASE and adapter not in self.adapter_names:
+                    raise LiveError(f"없는 어댑터: {adapter}")
+                t0 = time.time()
+                dists = self._forward_with(adapter, prompts, n_options)
+                log.info("실시간 예측 %s × %d개 프롬프트: %.2f초", adapter, len(prompts), time.time() - t0)
+                if len(self._cache) >= CACHE_MAX:          # 새 문항을 계속 물어도 끝없이 커지지 않게 한다
+                    self._cache.pop(next(iter(self._cache)))
+                self._cache[cache_key] = dists
+        return self._cache[cache_key]
+
+    def _predict(self, key: tuple, attribute: str, adapter: str, question: str, options: list[str]) -> dict:
+        groups = self.store.groups[attribute]
+        steer = self.store.steering[attribute]
+        prompts = [build_prompt(steer, groups, g, question, options) for g in groups]
+        lora = self._run(key, adapter, prompts, len(options))
+        base = self._run(key, BASE, prompts, len(options))
+        return {g: {"lora": lora[i], "base": base[i]} for i, g in enumerate(groups)}
+
+    def predict(self, qkey: str, attribute: str, adapter: str) -> dict[str, dict[str, list[float]]]:
+        q = self.store.questions[qkey]
+        return self._predict((qkey, attribute), attribute, adapter, q.text, q.all_options)
+
+    def predict_new(self, question: str, options: list[str], attribute: str, adapter: str) -> dict:
+        """목록에 없는 새 문항. `options`는 끝의 무응답까지 포함한다."""
+        digest = hashlib.sha256("\x1f".join([question, *options]).encode()).hexdigest()[:16]
+        return self._predict(("new", digest, attribute), attribute, adapter, question, options)
+
+
+class LiveBackend(InferenceBackend):
+    """GPU에서 원래 정밀도(bfloat16)의 Bllossom 8B를 transformers + PEFT로 돌린다."""
 
     def __init__(self, store: Store, base_model: str | None = None, adapter_dirs: dict[str, Path] | None = None,
                  device: str | None = None, dtype: str | None = None, load_4bit: bool | None = None,
                  batch_size: int | None = None, revision: str | None = None):
-        self.store = store
+        self._init_common(store)
         self.base_model = base_model or config.LIVE_BASE_MODEL
         # 허깅페이스에서 받을 때는 판을 고정한다. 저장소가 바뀌어도 어댑터를 학습한 가중치를 받는다
         self.revision = revision if revision is not None else (
@@ -78,8 +135,7 @@ class LiveBackend:
         self.dtype = dtype or config.LIVE_DTYPE or None
         self.load_4bit = config.LIVE_4BIT if load_4bit is None else load_4bit
         self.batch_size = batch_size or config.LIVE_BATCH or None
-        self._lock = threading.Lock()
-        self._cache: dict[tuple, list[list[float]]] = {}
+        self.adapter_names = list(self.adapter_dirs)
         self._model = self._tok = None
         self._letters: list[tuple[int, int]] = []
         self.load_seconds: float | None = None
@@ -186,7 +242,8 @@ class LiveBackend:
         log.info("모델을 올렸다 (%.1f초). 어댑터: %s", self.load_seconds, ", ".join(self.adapter_dirs))
 
     def describe(self) -> dict:
-        return {"base_model": self.base_model, "revision": self.revision, "device": self.device, "dtype": self.dtype,
+        return {"engine": "transformers", "quantized": bool(self.load_4bit),
+                "base_model": self.base_model, "revision": self.revision, "device": self.device, "dtype": self.dtype,
                 "four_bit": bool(self.load_4bit), "batch_size": self.batch_size,
                 "adapters": list(self.adapter_dirs), "load_seconds": self.load_seconds}
 
@@ -212,42 +269,9 @@ class LiveBackend:
                 out.append([round(x / total, 5) for x in p])
         return out
 
-    def _run(self, key: tuple, adapter: str, prompts: list[str], n_options: int) -> list[list[float]]:
-        """어댑터 하나(또는 학습 전 모델)로 프롬프트들을 돌린다. 같은 요청은 다시 돌리지 않는다."""
-        cache_key = (adapter, *key)
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        self.load()
-        with self._lock:          # 어댑터를 바꿔 끼우는 동안 다른 요청이 끼어들지 못하게 한다
-            if cache_key not in self._cache:
-                t0 = time.time()
-                if adapter == BASE:
-                    with self._model.disable_adapter():
-                        dists = self._forward(prompts, n_options)
-                else:
-                    if adapter not in self.adapter_dirs:
-                        raise LiveError(f"없는 어댑터: {adapter}")
-                    self._model.set_adapter(adapter)
-                    dists = self._forward(prompts, n_options)
-                if len(self._cache) >= CACHE_MAX:          # 새 문항을 계속 물어도 끝없이 커지지 않게 한다
-                    self._cache.pop(next(iter(self._cache)))
-                log.info("실시간 예측 %s × %d개 프롬프트: %.2f초", adapter, len(prompts), time.time() - t0)
-                self._cache[cache_key] = dists
-        return self._cache[cache_key]
-
-    def _predict(self, key: tuple, attribute: str, adapter: str, question: str, options: list[str]) -> dict:
-        groups = self.store.groups[attribute]
-        steer = self.store.steering[attribute]
-        prompts = [build_prompt(steer, groups, g, question, options) for g in groups]
-        lora = self._run(key, adapter, prompts, len(options))
-        base = self._run(key, BASE, prompts, len(options))
-        return {g: {"lora": lora[i], "base": base[i]} for i, g in enumerate(groups)}
-
-    def predict(self, qkey: str, attribute: str, adapter: str) -> dict[str, dict[str, list[float]]]:
-        q = self.store.questions[qkey]
-        return self._predict((qkey, attribute), attribute, adapter, q.text, q.all_options)
-
-    def predict_new(self, question: str, options: list[str], attribute: str, adapter: str) -> dict:
-        """목록에 없는 새 문항. `options`는 끝의 무응답까지 포함한다."""
-        digest = hashlib.sha256("\x1f".join([question, *options]).encode()).hexdigest()[:16]
-        return self._predict(("new", digest, attribute), attribute, adapter, question, options)
+    def _forward_with(self, adapter: str, prompts: list[str], n_options: int) -> list[list[float]]:
+        if adapter == BASE:
+            with self._model.disable_adapter():
+                return self._forward(prompts, n_options)
+        self._model.set_adapter(adapter)
+        return self._forward(prompts, n_options)

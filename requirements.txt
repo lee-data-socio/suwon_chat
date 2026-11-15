@@ -26,5 +26,10 @@ transformers==5.22.2
 peft==0.21.2
 accelerate==1.15.0
 
+# 양자화 버전 (PREDICT_BACKEND=gguf): GPU 없이 양자화한 Bllossom을 llama.cpp로 돌린다
+# 컴파일러 없이 깔려면 미리 빌드된 파일을 받는다 (리눅스·맥·윈도우 CPU용):
+#   pip install llama-cpp-python==0.3.36 --only-binary :all: --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+# 어댑터를 새로 변환할 때만: pip install gguf
+
 # 테스트
 pytest==9.2.0

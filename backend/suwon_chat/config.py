@@ -34,7 +34,10 @@ REPORTS_VECTORS = DB_PATH.parent / "reports_vectors.npy"
 # 서버를 켤 때 임베딩 모델을 미리 올릴지. 꺼도 첫 검색 때 올라간다.
 WARM_EMBEDDER = os.environ.get("SUWON_WARM_EMBEDDER", "1") != "0"
 
-# 예측을 어디서 가져올지. lookup: 정리본에 저장된 예측을 조회한다. live: 모델을 직접 돌린다 (suwon_chat/live.py)
+# 예측을 어디서 가져올지
+#   lookup: 정리본에 저장된 예측을 조회한다 (기본. GPU 필요 없음)
+#   live:   GPU에서 Bllossom 8B를 직접 돌린다 (suwon_chat/live.py)
+#   gguf:   GPU 없이 양자화한 Bllossom 8B를 CPU에서 돌린다 (suwon_chat/quantized.py)
 PREDICT_BACKEND = os.environ.get("PREDICT_BACKEND", "lookup").strip().lower()
 DEFAULT_BASE_MODEL = "MLP-KTLim/llama-3-Korean-Bllossom-8B"
 LIVE_BASE_MODEL = os.environ.get("LIVE_BASE_MODEL", DEFAULT_BASE_MODEL)   # 허깅페이스 이름이나 로컬 폴더
@@ -46,6 +49,13 @@ LIVE_DTYPE = os.environ.get("LIVE_DTYPE", "").strip().lower()     # bfloat16 | f
 LIVE_4BIT = os.environ.get("LIVE_4BIT", "0") == "1"               # 4비트로 줄여 올린다 (NVIDIA GPU)
 _batch = os.environ.get("LIVE_BATCH", "").strip()
 LIVE_BATCH = int(_batch) if _batch.isdigit() else 0               # 한 번에 돌릴 프롬프트 수. 0이면 GPU 8, 그 밖은 1
+
+# 양자화 모델 (PREDICT_BACKEND=gguf). Bllossom 팀이 올린 4비트 파일이 기본이다
+GGUF_REPO = os.environ.get("GGUF_REPO", "MLP-KTLim/llama-3-Korean-Bllossom-8B-gguf-Q4_K_M")
+GGUF_FILE = os.environ.get("GGUF_FILE", "llama-3-Korean-Bllossom-8B-Q4_K_M.gguf")
+GGUF_MODEL = Path(os.environ.get("GGUF_MODEL", ROOT / "models" / GGUF_FILE))     # 받아 둔 파일의 경로
+_threads = os.environ.get("GGUF_THREADS", "").strip()
+GGUF_THREADS = int(_threads) if _threads.isdigit() else 0                        # 0이면 CPU 코어의 절반
 
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "claude-haiku-5-5")
 CHAT_EFFORT = os.environ.get("CHAT_EFFORT", "low")

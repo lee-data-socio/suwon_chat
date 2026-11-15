@@ -30,7 +30,7 @@ export function ContextCards({
       <div className="ctx-head">
         <BookOpen size={14} aria-hidden />
         <strong>참고 문서</strong>
-        <span>예측에 사용되지 않은 자료</span>
+        <span>해석에 인용한 자료 · 예측 모델은 이 문서를 보지 않았습니다</span>
       </div>
       <div className="ctx-list">
         {shown.map(({ item: it, pages }) => (

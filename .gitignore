@@ -4,6 +4,9 @@
 
 # (adapters/ 는 올린다: 시연에 쓰는 LoRA 어댑터 세 개, 약 40MB)
 
+# 내려받은 모델 파일
+/models/
+
 # 만들어지는 파일
 /data/
 __pycache__/

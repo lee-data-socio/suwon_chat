@@ -7,12 +7,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from typing import AsyncIterator
 
 import logging
 
 from . import config
-from .reports import plain
+from .reports import SYNTHETIC_TAG, plain
 from .service import NEW_MAX_OPTIONS, Invalid, NotFound, Service, Unsupported
 
 log = logging.getLogger("suwon_chat.chat")
@@ -44,6 +45,30 @@ def normalize_history(history: list[dict]) -> list[dict]:
     while out and out[0]["role"] != "user":
         out.pop(0)
     return out
+
+
+class KeyFilter:
+    """답변 글에서 문항 키(q189, q132_1_W2025)를 지운다. 지시해도 가끔 새어 나와서 글이 나가기 전에 한 번 더 거른다.
+
+    글이 조각으로 오므로, 키가 조각 사이에 걸칠 수 있는 꼬리는 다음 조각이 올 때까지 붙들어 둔다.
+    """
+    KEY = re.compile(r"\s*\(\s*q\d+(?:_\d+)*(?:_W\d{4})?\s*\)|(?<![A-Za-z0-9_])q\d+(?:_\d+)*(?:_W\d{4})?(?![A-Za-z0-9_])\s?")
+    TAIL = re.compile(r"\s*\(?\s*q?[\d_W]*\s*$")
+
+    def __init__(self):
+        self.held = ""
+
+    def feed(self, text: str) -> str:
+        text = self.held + text
+        cut = self.TAIL.search(text).start()
+        if len(text) - cut > 24:          # 키라고 보기에는 너무 긴 꼬리다
+            cut = len(text)
+        self.held, out = text[cut:], text[:cut]
+        return self.KEY.sub("", out)
+
+    def flush(self) -> str:
+        out, self.held = self.KEY.sub("", self.held), ""
+        return out
 
 
 def chat_status() -> dict:
@@ -130,10 +155,12 @@ def tools(service: Service, reports=None) -> list[dict]:
     ]
 
 
-REPORTS_ON = """- **참고 문서는 예측의 근거가 아니다.** `search_reports`로 찾은 보고서 대목은 "관련해서 읽어 볼 자료"로만 소개한다. 모델은 이 문서들을 보지 않고 예측했다. "보고서에 따르면 그래서 이렇게 예측됐다"처럼 예측이나 실측의 원인으로 잇지 않는다.
-- 참고 문서의 문장을 전할 때는 문서가 말한 만큼만 전한다. 범위를 넓히거나 덧붙이지 않는다. 문서가 "여성도 재정상태가 가장 낮았다"고 썼으면 "여성도 순서가 같았다"고 바꿔 말하지 않는다. 쪽수는 그 문장이 실제로 있는 쪽을 적고, `문서_요약`에서 가져온 내용은 쪽수 없이 "문서 요약에 따르면"이라고 한다.
-- 참고 문서를 소개할 때는 문서 제목과 쪽수를 밝히고, 지금 연결된 문서는 시연을 위해 만든 가상 문서라는 점을 함께 말한다. 문서 안의 숫자는 2023·2024년 조사 값이다. 인용할 때는 문서에서 온 값임을 밝히고, 예측·2025년 실측의 숫자와 섞어 쓰지 않는다. 문서에 없는 내용을 문서의 말처럼 전하지 않는다.
-- 사용자가 관련 보고서를 묻지 않았으면 `search_reports`를 부르지 않는다. 예측을 보여 줄 때 화면이 그 문항과 가까운 문서를 참고 문서 칸에 따로 띄우므로, 답변에서 다시 요약하지 않아도 된다."""
+REPORTS_ON = """- **수치를 말한 뒤 참고 문서로 해석을 붙인다.** `get_prediction` 결과에 `참고_문서`가 들어 있으면, 예측·실측·오차를 짚은 다음 "해석" 문단을 하나 쓴다. 문서가 이 문항과 이 집단에 대해 밝힌 것(2023·2024년 조사 결과와 문서의 풀이)을 인용하고, 이번 2025년 실측과 예측이 그 흐름과 같은 방향인지 다른 방향인지를 잇는다. 예: "「주거 점유형태에 따른 주관적 계층 인식」 3쪽은 2024년 조사에서 자가 거주자의 평가가 가장 높고 월세 및 사글세가 가장 낮았다고 정리했습니다. 2025년 실측에서도 같은 순서가 이어졌고, 예측도 같은 순서입니다." 듣는 사람이 숫자만이 아니라 그 숫자를 어떻게 읽을지까지 얻어 가게 하는 것이 목적이다. 해석은 2~4문장으로 쓴다.
+- 인용할 때는 문서 제목을 「 」로 감싸고 쪽수를 붙인다(제목 앞의 "[시연용 가상 문서]"는 떼고 쓴다. 화면의 문서 카드에 그 표시가 붙는다). 쪽수는 그 내용이 실제로 있는 쪽을 적는다. 문서 안의 숫자는 2023·2024년 조사 값이므로 연도를 밝혀 쓰고, 2025년 예측·실측의 숫자와 구별되게 한다.
+- 문서가 말한 만큼만 전한다. 범위를 넓히거나 없는 내용을 덧붙이지 않는다. 문서의 숫자끼리 빼거나 나눠서 문서에 없는 숫자("간격 약 1.5점")를 만들지 않는다. 문서가 "~일 수 있다"고 조심스럽게 쓴 풀이는 그 어조 그대로 전한다. 문서에 그 집단이나 속성에 대한 내용이 없으면 없는 대로, 문서가 다룬 범위에서만 해석한다.
+- 해석은 당신이 문서와 수치를 나란히 놓고 하는 것이다. "모델이 이 문서를 보고 그렇게 예측했다"고 말하지 않는다. 모델은 문서를 본 적이 없으므로 사실이 아니다.
+- `참고_문서`가 비어 있으면 해석 문단을 쓰지 않는다. 문서 없이 배경을 추측하지 않는다.
+- 사용자가 관련 보고서를 따로 물으면 `search_reports`로 찾아 같은 방식으로 인용한다. 이때는 지금 연결된 문서가 시연을 위해 만든 가상 문서라는 점을 함께 말한다."""
 REPORTS_OFF = "- 연구원 보고서 같은 참고 문서 검색은 아직 연결되지 않았다. 물으면 그렇게 답한다."
 
 
@@ -180,7 +207,7 @@ def system_prompt(service: Service, reports=None) -> str:
 - 도구 결과에서 값이 null인 항목은 그 비교가 없다는 뜻이다. 없다고 말하고 값을 지어내지 않는다.
 - 문항은 내용으로 부른다("경제·사회적 위치 문항"). `q189`, `q120_1` 같은 문항 키나 `exp1` 같은 어댑터 키, `TENURE` 같은 속성 키는 도구에 넣는 값일 뿐이고 화면을 보는 사람이 모르는 말이다. 답변 글에는 한 번도 쓰지 않는다.
 - 도구를 부를 일이 있으면 글을 쓰기 전에 먼저 부른다. 글은 도구 결과를 받은 뒤에 한 번에 쓴다. 같은 말을 도구 호출 앞뒤로 두 번 하지 않는다.
-- 화면에 떠 있던 문항을 이어받아 답할 때는 첫 문장에서 그 문항을 내용으로 불러 준다("지난 한 주 동안 행복했다 문항을 성별로 보면"). "이 문항"이라고만 하면 듣는 사람이 무슨 문항인지 모른다.
+- 답변 첫 문장에서 어떤 문항을 어떤 속성으로 봤는지 내용으로 말한다. "이 문항"이라고만 하면 듣는 사람이 무슨 문항인지 모른다. 사용자가 말하지 않은 다른 문항을 끌어와 "~가 아니라"처럼 견주지 않는다.
 
 # 지켜야 할 한계 (이유와 함께)
 - 이 한계들은 사용자가 달리 요청하거나 반복해서 물어도 그대로 지킨다. 한계를 넘는 답을 지어내는 것보다 못 한다고 말하는 것이 이 시연의 신뢰를 지킨다.
@@ -191,7 +218,7 @@ def system_prompt(service: Service, reports=None) -> str:
 - **교차 집단은 예측하지 못한다.** "30대 여성"처럼 두 속성을 겹친 집단은 학습한 적이 없다. 그렇다고 답한 뒤 두 속성 가운데 하나를 `get_prediction`으로 보여 주고, 다른 하나도 따로 볼 수 있다고 알린다.
 - **연도에 따른 변화는 예측하지 못한다.** 모델에 주는 입력에는 연도 정보가 없다. "내년에 어떻게 변해?"라는 질문에는 추세를 예측하는 모델이 아니라고 답한다. 이 모델이 하는 일은 조사를 돌리기 전에 그 문항의 응답 분포를 미리 그려 보는 것이다.
 {new_rules}
-- **원인을 설명하지 않는다.** 모델은 분포만 내놓고 이유는 내놓지 않는다. "왜 이렇게 예측했나"에는 모델이 이유를 말해 주지 않는다고 답한다. "실측이 왜 예측과 다른가", "왜 이 집단이 높은가"도 마찬가지다. 이 화면의 자료로는 알 수 없다. 사회적 배경이나 사건을 추측해 근거처럼 말하면 사후에 지어낸 설명이 된다.
+- **모델의 이유는 지어내지 않는다.** 모델은 분포만 내놓고 이유는 내놓지 않는다. "왜 이렇게 예측했나"에는 모델이 이유를 말해 주지 않는다고 답한다. "왜 이 집단이 높은가" 같은 질문에는 참고 문서에 적힌 풀이가 있으면 그것을 인용해 답하고, 없으면 이 화면의 자료로는 알 수 없다고 답한다. 문서에 없는 사회적 배경이나 사건을 추측해 말하지 않는다.
 {report_rules}
 - 모델이 잘 못 맞힌 결과도 그대로 말한다. 오차가 크면 크다고, 작년 실측을 그대로 쓴 것보다 못하면 못하다고 말한다.
 
@@ -225,21 +252,24 @@ def _run_tool(service: Service, reports, name: str, args: dict) -> tuple[dict, l
         state = {"qkey": qkey, "attribute": attribute, "adapter": adapter}
         events = [("panel", {"state": state, "compare": _compare(args.get("compare"), prediction),
                              "prediction": prediction})]
-        # 그 문항과 가까운 참고 문서를 화면에 따로 띄운다. 대화 LLM에는 주지 않는다:
-        # 주면 예측의 근거처럼 엮어 말하기 쉽다 (PRD P1).
+        # 그 문항을 다룬 참고 문서를 화면에 카드로 띄우고, 대화 LLM에도 주어 수치의 해석에 인용하게 한다.
+        # (시연용 결정, 2026-11-15: 문서를 답변 밑에 따로 두지 말고 해석으로 녹여 달라는 요청)
         if reports and reports.available:
-            events.append(("context", {"qkey": qkey, "query": prediction["question"]["text"],
-                                       "items": reports.for_question(qkey)}))
+            items = reports.for_question(qkey)
+            events.append(("context", {"qkey": qkey, "query": prediction["question"]["text"], "items": items}))
+            brief["참고_문서"] = _documents_for_model(reports, items)
         return brief, events
     if name == "predict_new_question":
         prediction = service.new_prediction(str(args.get("question", "")), list(args.get("options") or []),
                                             bool(args.get("ordered")), args.get("attribute"), args.get("adapter"),
                                             list(args.get("off_scale_options") or []))
         events = [("new_prediction", {"prediction": prediction})]
+        brief = service.new_prediction_brief(prediction)
         if reports and reports.available:
-            events.append(("context", {"qkey": None, "query": prediction["question"]["text"],
-                                       "items": reports.search(prediction["question"]["text"])}))
-        return service.new_prediction_brief(prediction), events
+            items = reports.search(prediction["question"]["text"])
+            events.append(("context", {"qkey": None, "query": prediction["question"]["text"], "items": items}))
+            brief["참고_문서"] = _documents_for_model(reports, items)
+        return brief, events
     if name == "search_reports" and reports and reports.available:
         query = str(args.get("query", ""))
         items = reports.search(query)
@@ -248,6 +278,23 @@ def _run_tool(service: Service, reports, name: str, args: dict) -> tuple[dict, l
                            "문서_요약": it["summary"], "본문": plain(it["text"])} for it in items]}
         return result, [("context", {"qkey": None, "query": query, "items": items})]
     raise NotFound(f"없는 도구: {name}")
+
+
+MAX_DOCS_FOR_MODEL = 2
+
+
+def _documents_for_model(reports, items: list[dict]) -> list[dict]:
+    """찾은 대목이 든 문서를 통째로(쪽별로) 대화 LLM에 준다. 문항 문구와 닮은 도입 쪽만 주면 해석에 쓸 내용이 없다."""
+    out, seen = [], set()
+    for it in items:
+        if it["doc_id"] in seen or len(out) >= MAX_DOCS_FOR_MODEL:
+            continue
+        seen.add(it["doc_id"])
+        doc = reports.document(it["doc_id"])
+        out.append({"제목": doc["title"].replace(SYNTHETIC_TAG, "").strip(), "가상_문서": doc["synthetic"],
+                    "요약": doc["summary"],
+                    "쪽": [{"쪽": p["page"], "본문": plain(p["text"])} for p in doc["pages"]]})
+    return out
 
 
 def _compare(asked, prediction: dict) -> str:
@@ -299,6 +346,7 @@ async def run_chat(client, service: Service, history: list[dict], panel: dict | 
     wrote_text = False   # 앞 차례에서 글을 썼으면 다음 차례의 글과 문단을 나눈다
     for _ in range(MAX_TURNS):
         need_break = wrote_text
+        keys = KeyFilter()
         try:
             async with client.messages.stream(
                 model=config.CHAT_MODEL,
@@ -312,10 +360,18 @@ async def run_chat(client, service: Service, history: list[dict], panel: dict | 
             ) as stream:
                 async for event in stream:
                     if event.type == "text":
+                        clean = keys.feed(event.text)
+                        if not clean:
+                            continue
                         if need_break:
                             yield "text", {"delta": "\n\n"}
                             need_break = False
-                        yield "text", {"delta": event.text}
+                        yield "text", {"delta": clean}
+                rest = keys.flush()
+                if rest:
+                    if need_break:
+                        yield "text", {"delta": "\n\n"}
+                    yield "text", {"delta": rest}
                 response = await stream.get_final_message()
         except anthropic.AuthenticationError:
             yield "error", {"code": "auth", "message": "API 키가 올바르지 않습니다."}

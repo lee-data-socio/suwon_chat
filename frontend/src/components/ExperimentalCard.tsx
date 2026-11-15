@@ -2,7 +2,7 @@ import { FlaskConical, Radio, TriangleAlert } from "lucide-react";
 import type { Prediction } from "../types";
 import type { Theme } from "../lib/color";
 import type { SeriesDef } from "../lib/format";
-import { sourceTitle } from "../lib/labels";
+import { sourceLabel, sourceTitle } from "../lib/labels";
 import { MiniChart } from "./MiniChart";
 
 /**
@@ -22,7 +22,7 @@ export function ExperimentalCard({ p, theme }: { p: Prediction; theme: Theme }) 
           </span>
           <span className="rc-tag rc-source is-live" title={sourceTitle(true)}>
             <Radio size={12} aria-hidden />
-            실시간
+            {sourceLabel(true)}
           </span>
           <span className="rc-tag rc-exp-tag">
             <FlaskConical size={12} aria-hidden />

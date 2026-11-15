@@ -4,6 +4,7 @@
     python -m suwon_chat.live_check --all           # 전부: 어댑터마다 3,729칸. 시연에 쓰기 전에 한 번은 돌린다
     python -m suwon_chat.live_check --adapter exp1 --pairs 5
     python -m suwon_chat.live_check --csv 결과.csv   # 칸마다의 값을 파일로 남긴다
+    python -m suwon_chat.live_check --backend gguf  # GPU 없이 양자화 모델로 돌릴 때 (기준이 다르다. 아래)
 
 칸마다 "저장된 예측과 실시간 예측 사이의 거리"를 잰다(순서형·이분형은 WD, 명목형은 TV. 0이면 같다).
 어댑터 예측과 학습 전 모델 예측을 따로 재고, 어댑터가 제대로 바뀌어 끼워졌는지도 본다
@@ -13,6 +14,9 @@
 달라도 칸당 WD 평균이 0.0025쯤 달라진다고 적었다. 통과 기준은 칸별 거리의 평균 0.005 이하다.
 참고로 저장된 exp1과 exp2의 예측 사이 거리는 평균 0.018쯤이라, 어댑터가 뒤바뀌면 이 기준에 걸린다.
 4비트로 올리면 기준을 넘을 수 있다.
+
+양자화 모델(`--backend gguf`)은 가중치가 줄어 있어 저장된 예측과 같은 값이 나오지 않는다. 그래서 "같다"가 아니라
+"테스트에 쓸 만큼 가깝다"를 본다: 맞는 어댑터가 끼워졌는지, 그리고 칸별 거리의 평균이 QUANT_TOLERANCE 이하인지.
 """
 from __future__ import annotations
 
@@ -27,7 +31,8 @@ from .live import LiveBackend, LiveError
 from .metrics import distance
 from .store import Store
 
-TOLERANCE = 0.005
+TOLERANCE = 0.005          # 원래 정밀도로 돌렸을 때: 저장된 예측과 같다고 볼 기준
+QUANT_TOLERANCE = 0.02     # 양자화 모델: 테스트에 쓸 만큼 가깝다고 볼 기준 (저장된 exp1과 exp2 사이 거리가 0.018쯤이다)
 
 
 def pick_pairs(store: Store, adapter: str, n: int, seed: int) -> list[tuple[str, str]]:
@@ -56,11 +61,22 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=20261115)
     ap.add_argument("--batch", type=int, default=1, help="한 번에 돌릴 프롬프트 수. 기본 1 (묶어 돌릴 때의 차이를 빼고 잰다)")
     ap.add_argument("--csv", help="칸마다의 결과를 쓸 파일")
+    ap.add_argument("--backend", choices=["live", "gguf"],
+                    default="gguf" if config.PREDICT_BACKEND == "gguf" else "live",
+                    help="live: GPU에서 원래 정밀도로. gguf: CPU에서 양자화 모델로")
     args = ap.parse_args()
 
     store = Store()
-    backend = LiveBackend(store, batch_size=args.batch)
-    print("모델을 올린다. 처음에는 가중치 약 16GB를 내려받는다…", flush=True)
+    quantized = args.backend == "gguf"
+    if quantized:
+        from .quantized import QuantizedBackend
+        backend = QuantizedBackend(store)
+        print("양자화 모델을 올린다…", flush=True)
+    else:
+        backend = LiveBackend(store, batch_size=args.batch)
+        print("모델을 올린다. 처음에는 가중치 약 16GB를 내려받는다…", flush=True)
+    limit = QUANT_TOLERANCE if quantized else TOLERANCE
+    same = "테스트에 쓸 만큼 가깝다" if quantized else "저장된 값과 같다"
     try:
         backend.load()
     except LiveError as e:
@@ -101,14 +117,14 @@ def main() -> int:
         mean = lambda v: sum(v) / len(v)
         nearest = min(d_to_saved, key=lambda a: mean(d_to_saved[a]))
         checks = {
-            "어댑터 예측이 저장된 값과 같다": mean(d_lora) <= TOLERANCE,
-            "학습 전 모델 예측이 저장된 값과 같다": mean(d_base) <= TOLERANCE,
+            f"어댑터 예측이 {same}": mean(d_lora) <= limit,
+            f"학습 전 모델 예측이 {same}": mean(d_base) <= limit,
             "맞는 어댑터가 끼워졌다": nearest == adapter,
         }
         ok = ok and all(checks.values())
         seconds = time.time() - t0
         print(f"\n[{adapter}] {cells}칸 ({len(pairs)}쌍), {seconds:.0f}초 (쌍당 {seconds / len(pairs):.1f}초. 학습 전 모델 계산 포함)")
-        print(f"  저장된 예측과의 거리(칸 평균)  어댑터 {mean(d_lora):.4f} · 학습 전 모델 {mean(d_base):.4f}   (기준 {TOLERANCE} 이하)")
+        print(f"  저장된 예측과의 거리(칸 평균)  어댑터 {mean(d_lora):.4f} · 학습 전 모델 {mean(d_base):.4f}   (기준 {limit} 이하)")
         print(f"  가장 많이 다른 칸  {worst[0]:.4f}  {worst[1]}")
         print("  저장된 각 어댑터의 예측과의 거리  " + " · ".join(f"{a} {mean(v):.4f}" for a, v in d_to_saved.items())
               + f"   → 가장 가까운 것 {nearest}")
@@ -124,7 +140,10 @@ def main() -> int:
     if not ok:
         print("\n결과: 실패. 저장된 예측과 다르다. 장치·정밀도(4비트 여부)를 확인하고, 시연에는 조회 버전을 쓴다.")
         return 1
-    if args.all and set(adapters) == set(config.ADAPTERS):
+    if quantized:
+        print("\n결과: 통과. 양자화 모델의 예측이 저장된 예측에 테스트용으로 쓸 만큼 가깝다. "
+              "같은 값은 아니므로 보고서의 숫자와 나란히 놓을 때는 조회 버전을 쓴다.")
+    elif args.all and set(adapters) == set(config.ADAPTERS):
         print("\n결과: 통과. 세 어댑터의 모든 칸이 저장된 예측과 맞는다. 실시간 예측을 시연에 써도 된다.")
     else:
         print("\n결과: 빠른 점검 통과. 본 것은 일부다. 시연에 쓰기 전에 `--all`로 전부 확인한다.")

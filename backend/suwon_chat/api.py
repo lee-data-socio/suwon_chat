@@ -55,10 +55,14 @@ async def lifespan(app: FastAPI):
         from .live import LiveBackend
         backend = LiveBackend(store)
         backend.load()            # 모델을 못 올리면 여기서 이유와 함께 멈춘다. 반쯤 켜진 서버를 두지 않는다
+    elif config.PREDICT_BACKEND == "gguf":
+        from .quantized import QuantizedBackend
+        backend = QuantizedBackend(store)
+        backend.load()
     elif config.PREDICT_BACKEND == "lookup":
         backend = LookupBackend(store)
     else:
-        raise RuntimeError(f"PREDICT_BACKEND는 lookup이나 live여야 한다: {config.PREDICT_BACKEND!r}")
+        raise RuntimeError(f"PREDICT_BACKEND는 lookup, live, gguf 가운데 하나여야 한다: {config.PREDICT_BACKEND!r}")
     app.state.service = Service(store, backend)
     if backend.source == "live":
         # 추천 질문의 장면을 미리 돌려 둔다. 발표에서 처음 누를 때 기다리지 않게 한다

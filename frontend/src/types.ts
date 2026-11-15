@@ -32,6 +32,10 @@ export interface Meta {
 }
 
 export interface LiveInfo {
+  /** transformers(원래 정밀도) | llama.cpp(양자화 모델) */
+  engine?: string;
+  /** 가중치를 줄인 모델인가. 참이면 저장된 예측과 값이 조금 다르다 */
+  quantized?: boolean;
   base_model: string;
   device: string;
   dtype: string;

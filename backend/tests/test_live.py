@@ -311,3 +311,53 @@ def test_check_fails_when_the_untrained_model_is_wrong(monkeypatch, service, cap
     """학습 전 모델 자리에 어댑터의 값이 나오면(어댑터가 꺼지지 않으면) 잡아낸다."""
     assert run_check(monkeypatch, service, ["--pairs", "12", "--adapter", "exp1"], base_from="exp1") == 1
     assert "실패  학습 전 모델 예측이 저장된 값과 같다" in capsys.readouterr().out
+
+
+# ---- 양자화 버전: 파일이 없을 때의 안내 (실제 추론은 4.9GB 모델이 있어야 해서 live_check로 확인한다) ----
+def test_quantized_backend_reports_missing_files(service, tmp_path):
+    from suwon_chat.quantized import QuantizedBackend, _quant_name
+    adapters = {"exp1": tmp_path / "exp1.gguf"}
+    with pytest.raises(LiveError, match=r"(?s)양자화 모델 파일이 없다.*--download"):
+        QuantizedBackend(service.store, model_path=tmp_path / "none.gguf", adapter_files=adapters).load()
+    (tmp_path / "model.gguf").write_bytes(b"GGUF")
+    with pytest.raises(LiveError, match=r"(?s)어댑터 exp1의 GGUF 파일이 없다.*convert_adapters_gguf"):
+        QuantizedBackend(service.store, model_path=tmp_path / "model.gguf", adapter_files=adapters).load()
+    adapters["exp1"].write_bytes(b"GGUF")
+    with pytest.raises(LiveError, match="양자화 모델을 올리지 못했다"):          # 깨진 파일
+        QuantizedBackend(service.store, model_path=tmp_path / "model.gguf", adapter_files=adapters).load()
+    assert _quant_name("llama-3-Korean-Bllossom-8B-Q4_K_M.gguf") == "Q4_K_M 양자화"
+    assert _quant_name("llama-3-Korean-Bllossom-8B.Q8_0.gguf") == "Q8_0 양자화"
+
+
+def test_converted_adapters_hold_the_same_weights():
+    """llama.cpp용으로 바꾼 어댑터가 원래 어댑터와 같은 값을 담고 있다. q 쪽 B 행렬만 행 순서가 바뀐다."""
+    import gguf
+    import numpy as np
+    from safetensors import safe_open
+    from suwon_chat import config
+    # llama.cpp가 q·k 가중치에 쓰는 행 순서: 머리(32개)마다 앞 절반과 뒤 절반을 번갈아 놓는다.
+    # 허깅페이스의 (머리 h, 절반 j, 자리 i) 행이 llama.cpp에서는 (머리 h, 자리 i, 절반 j) 행이 된다.
+    n_head, half = 32, 64
+    order = np.empty(4096, dtype=int)
+    for h in range(n_head):
+        for j in range(2):
+            for i in range(half):
+                order[h * 128 + i * 2 + j] = h * 128 + j * half + i
+    for name in config.ADAPTERS:
+        folder = config.ADAPTER_DIR / name
+        reader = gguf.GGUFReader(str(folder / "adapter.gguf"))
+        tensors = {t.name: t for t in reader.tensors}
+        fields = reader.fields
+        assert bytes(fields["general.type"].parts[-1]).decode() == "adapter"
+        assert bytes(fields["adapter.type"].parts[-1]).decode() == "lora"
+        assert float(fields["adapter.lora.alpha"].parts[-1][0]) == 32.0
+        with safe_open(str(folder / "adapter_model.safetensors"), "np") as f:
+            keys = list(f.keys())
+            assert len(tensors) == len(keys) == 128
+            for key in keys:
+                layer, module, ab = key.split(".")[4], key.split(".")[6], key.split(".")[7][-1].lower()
+                out = f"blk.{layer}.{'attn_q' if module == 'q_proj' else 'attn_v'}.weight.lora_{ab}"
+                want = f.get_tensor(key)
+                if module == "q_proj" and ab == "b":
+                    want = want[order]
+                assert np.array_equal(np.asarray(tensors[out].data).reshape(want.shape), want), key

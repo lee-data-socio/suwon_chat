@@ -2,7 +2,7 @@ import { ArrowUpRight, Database, Radio } from "lucide-react";
 import type { CompareKey, PanelState } from "../types";
 import type { Theme } from "../lib/color";
 import { cardStats, seriesFor } from "../lib/format";
-import { isLiveMode, sourceTitle } from "../lib/labels";
+import { isLiveMode, sourceLabel, sourceTitle } from "../lib/labels";
 import { usePrediction } from "../lib/usePrediction";
 import { MiniChart } from "./MiniChart";
 
@@ -75,7 +75,7 @@ export function ResultCard({ state, compare, theme, compact, active, onDetail }:
             title={sourceTitle(live)}
           >
             {live ? <Radio size={12} aria-hidden /> : <Database size={12} aria-hidden />}
-            {live ? "실시간" : "사전 계산"}
+            {sourceLabel(live)}
           </span>
           {q.held_out && <span className="badge badge-held">학습에서 뺀 문항</span>}
         </div>

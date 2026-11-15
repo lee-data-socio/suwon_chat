@@ -66,7 +66,7 @@ export function ReportModal({ item, pages: citedPages, onClose }: { item: Contex
           {failed && <p className="report-fail">문서 전문을 불러오지 못해 인용된 쪽만 보입니다.</p>}
         </div>
         <footer className="report-foot">
-          {item.synthetic ? "시연을 위해 만든 가상 문서입니다. " : ""}이 문서는 예측에 사용되지 않았습니다.
+          {item.synthetic ? "시연을 위해 만든 가상 문서입니다. " : ""}예측 모델은 이 문서를 보지 않았고, 답변의 해석에만 인용됩니다.
         </footer>
       </div>
     </div>

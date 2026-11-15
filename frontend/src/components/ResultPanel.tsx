@@ -3,7 +3,7 @@ import { ChevronDown, Database, Radio, Table2, X, ZoomIn } from "lucide-react";
 import type { CompareKey, Meta, PanelState, Prediction, QuestionSummary } from "../types";
 import type { Theme } from "../lib/color";
 import { hasLastYear, seriesFor } from "../lib/format";
-import { adapterLabel, REFERENCE_ID, sourceTitle } from "../lib/labels";
+import { adapterLabel, REFERENCE_ID, sourceLabel, sourceTitle } from "../lib/labels";
 import { BinaryChart } from "./BinaryChart";
 import { DataTable } from "./DataTable";
 import { NominalChart } from "./NominalChart";
@@ -85,7 +85,7 @@ export function ResultPanel({ meta, questions, state, prediction: p, loading, er
             text={sourceTitle(live)}
           >
             {live ? <Radio size={14} aria-hidden /> : <Database size={14} aria-hidden />}
-            {live ? "실시간" : "사전 계산"}
+            {sourceLabel(live)}
           </Hint>
           <button className="btn" onClick={() => setPicking(true)}>
             문항 바꾸기 <ChevronDown size={15} aria-hidden />

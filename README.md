@@ -1,168 +1,210 @@
-# 수원서베이 시연 챗봇
+# 수원서베이 응답 예측 챗봇 (시연용)
 
-수원서베이 응답 분포 예측 실험의 결과를 채팅과 차트로 보여 주는 시연 화면이다.
-무엇을 왜 만드는지는 [docs/PRD.md](docs/PRD.md)에 있다.
+수원서베이(수원시 시민 대상 연례 설문)로 언어 모델을 학습시켜, **어떤 집단이 어떤 문항에 어떻게 답할지를 응답 분포로 예측**한 실험의 결과를 채팅으로 보여 주는 시연용 챗봇이다.
 
-## 준비
+질문을 하면 답변 안에 예측과 실제 조사 결과를 나란히 놓은 차트가 들어가고, 연구 보고서(시연용 가상 문서)의 내용을 인용해 그 수치를 풀이해 준다.
 
-저장소만 받으면 된다. 앱이 읽는 원본 자료(`source_data/`, 44MB)와 어댑터(`adapters/`, 40MB)가 저장소에 들어 있다.
+> 실제 서비스가 아니라 실험 결과를 설명하기 위한 시연 화면이다. 무엇을 왜 이렇게 만들었는지는 [docs/PRD.md](docs/PRD.md)에 있다.
+
+## 무엇을 보여 주나
+
+- **실험**: 한국어 언어 모델 Bllossom 8B에 작은 어댑터(LoRA)를 붙여 2023·2024년 수원서베이로 학습시키고, 2025년 조사 결과를 보지 않은 채 2025년 문항 113개의 응답 분포를 집단별로 예측했다. 방법은 SubPOP(UC Berkeley)을 따랐다.
+- **화면**: 예측과 2025년 실측을 집단별 막대로 나란히 보여 주고, 얼마나 맞았는지를 "7점 척도에서 약 0.2점"처럼 읽기 쉬운 말로 알려 준다.
+- **어댑터 세 개**를 갈아 끼워 볼 수 있다.
+
+| 어댑터 | 학습 자료 | 보여 주는 것 |
+|---|---|---|
+| 전체 학습 어댑터 | 2023·2024년 전체 | 다음 해 조사 결과를 얼마나 맞히나 |
+| 집단 제외 어댑터 | 7개 집단의 응답을 뺀 것 | 한 번도 보지 못한 집단을 얼마나 맞히나 |
+| 문항 제외 어댑터 | 4개 문항을 뺀 것 | 한 번도 보지 못한 문항을 얼마나 맞히나 |
+
+- **집단**: 성별, 연령, 주택유형, 점유형태, 고용형태, 통근·통학, 거주기간, 종교의 여덟 속성, 33개 집단. 한 번에 속성 하나로만 나눈다.
+- **참고 문서**: `reports/`의 가상 보고서 12편. 답변이 이 문서의 내용(2023·2024년 조사 결과)을 제목·쪽수와 함께 인용해 수치를 해석한다. 화면에는 "시연용 가상 문서"로 표시된다. 예측 모델은 이 문서를 보지 않았다.
+
+이 챗봇이 **하지 못하는 것**도 물으면 그렇게 답한다: 두 속성을 겹친 집단("30대 여성"), 연도에 따른 변화("내년에는?"), 모델이 그렇게 예측한 이유.
+
+## 빨리 시작하기
+
+저장소만 받으면 된다. 앱이 읽는 자료(`source_data/`)와 어댑터(`adapters/`)가 들어 있다. Python 3.12와 Node가 필요하다.
 
 ```bash
+# 1. 파이썬 환경
 conda create -n llm python=3.12 && conda activate llm
 pip install -r requirements.txt
-cp .env.example .env               # ANTHROPIC_API_KEY를 채운다. 없으면 추천 질문만 저장된 답변으로 나온다
-```
 
-- `source_data/`는 `수원서베이_학습결과_정리본`에서 앱과 테스트에 필요한 파일만 고른 것이다(`scripts/make_source_data.py`). 정리본 폴더 전체가 이 폴더 바로 아래에 있으면 그쪽을 읽는다.
-- 윈도우에서는 `scripts/serve.sh` 대신 아래 "실행"의 `python -m …` 명령을 쓴다.
+# 2. 대화 모델의 API 키 (없어도 된다. 그때는 추천 질문만 저장된 답변으로 나온다)
+cp .env.example .env               # ANTHROPIC_API_KEY= 뒤에 키를 적는다
 
-## 실행
-
-```bash
+# 3. 자료 색인 (처음 한 번)
 cd backend
-python -m suwon_chat.build_index   # 정리본 → data/suwon.db. 끝에 자체 점검을 돈다
-python -m suwon_chat.reports       # reports/*.md → 참고 문서 색인. 처음 한 번은 임베딩 모델(약 470MB)을 내려받는다
+python -m suwon_chat.build_index   # 예측과 실측 → data/suwon.db. 끝에 자체 점검을 돈다
+python -m suwon_chat.reports       # 참고 문서 색인. 임베딩 모델(약 470MB)을 처음 한 번 내려받는다
+
+# 4. 화면 빌드 (처음 한 번)
+cd ../frontend
+npm install && npm run build
+
+# 5. 서버 실행
+cd ../backend
 python -m uvicorn suwon_chat.api:app --port 8000
 ```
 
-`scripts/serve.sh`는 이 둘을 한 번에 한다.
+브라우저에서 http://localhost:8000 을 연다. 리눅스·맥에서는 3번과 5번을 `scripts/serve.sh`가 한 번에 한다.
 
-화면은 한 번 빌드해 두면 같은 서버가 내보낸다. http://localhost:8000 을 연다.
+## 써 보기
 
-```bash
-cd frontend
-npm install
-npm run build                      # frontend/dist 가 생긴다. 서버를 다시 켤 필요는 없다
+처음 화면의 추천 질문을 차례로 눌러 보면 실험의 줄거리를 따라갈 수 있다.
+
+| 추천 질문 | 보여 주는 것 |
+|---|---|
+| 기본 예측 | 점유형태별 예측과 실측이 얼마나 겹치나 |
+| 작년 값과 비교 | 작년 조사 결과를 그대로 쓰는 것보다 나은가 |
+| 못 본 집단 | 한 번도 보지 못한 집단(20년 이상 거주자)의 예측 |
+| 못 본 문항 · 잘 되는 경우 / 안 되는 경우 | 한 번도 보지 못한 문항의 예측. 잘 맞는 문항과 크게 어긋나는 문항 |
+| 할 수 없는 것 | "30대 여성"처럼 할 수 없는 질문에 어떻게 답하나 |
+
+직접 물어도 된다.
+
+- `수원시민 자부심을 거주기간별로 보여 줘`
+- `연령별로 바꿔서 보여 줘` (보던 문항을 이어받는다)
+- `이 결과와 관련된 보고서가 있어?`
+- `반려동물이 있는지 연령별로 보여 줘` (예/아니오 문항)
+
+답변 속 결과 카드의 **자세히 보기**를 누르면 오른쪽에 상세 패널이 열린다. 문항·속성·어댑터를 직접 바꾸고, 작년 실측이나 학습 전 모델을 함께 볼 수 있다. 참고 문서 카드를 누르면 문서 전체가 열린다.
+
+## 예측을 가져오는 세 가지 방식
+
+`.env`의 `PREDICT_BACKEND` 값 하나로 고른다. 화면과 대화는 셋 다 같다.
+
+| `PREDICT_BACKEND` | 하는 일 | 필요한 것 | 화면 표시 | 값 |
+|---|---|---|---|---|
+| `lookup` (기본) | 연구실 GPU 서버에서 미리 계산해 둔 예측을 `data/suwon.db`에서 꺼낸다 | 없음 | 사전 계산 | 보고서의 숫자 그대로 |
+| `live` | GPU에서 Bllossom 8B를 원래 정밀도로 올려 직접 추론한다 | GPU 메모리 16GB 이상 | 실시간 | 저장된 예측과 거의 같아야 한다 (아래 "확인 상태") |
+| `gguf` | CPU에서 4비트로 양자화한 Bllossom 8B로 직접 추론한다 | RAM 8GB 이상 | 실시간 · 양자화 | 저장된 예측과 꽤 다르다. 흐름을 돌려 보는 용도 |
+
+`live`와 `gguf`는 `adapters/`의 어댑터 세 개를 갈아 끼우며 질문마다 추론한다. 목록에 없는 **새 문항**도 채팅에 문구와 보기를 주면 예측한다(실측이 없으므로 "실험적"으로 표시되고 오차는 나오지 않는다).
+
+```
+'수원시에 AI 행정 서비스가 도입되면 이용하시겠습니까?' 보기는 전혀 이용하지 않겠다, 이용하지 않는 편이다,
+보통이다, 이용하는 편이다, 적극 이용하겠다. 연령별로 예측해 줘
 ```
 
-화면을 고치면서 볼 때는 `npm run dev`를 쓴다 (http://localhost:5173, `/api` 요청은 8000번 서버로 넘어간다).
+**보고서의 숫자와 나란히 보여 줄 때는 `lookup`을 쓴다.**
 
-주소로 장면을 바로 열 수 있다. 예: `http://localhost:8000/?q=q132_1_W2025&a=TENURE&m=exp1&with=last_year`
-(`q` 문항, `a` 속성, `m` 어댑터, `with` 함께 볼 것: `last_year` · `reference` · `zero_shot`)
+### 확인 상태 (2026-11-15)
+
+| 방식 | 확인한 것 | 확인하지 못한 것 |
+|---|---|---|
+| `lookup` | 113문항 × 8속성 × 3어댑터의 모든 값이 원본과 일치 (독립 검증 2회) | — |
+| `live` | 프롬프트가 평가용 프롬프트 11,187개와 글자 단위로 같음. 계산 순서와 정밀도가 원본 코드와 같음(독립 리뷰). 작은 무작위 모델로 전체 경로가 돎 | **실제 모델로 돌려 보지 못했다** (만든 PC에 GPU가 없다). GPU가 있는 PC에서 `live_check`가 처음 확인한다 |
+| `gguf` | 이 PC(GPU 없음, RAM 7.8GB)에서 실제로 돎. 올리는 데 16초, 프롬프트 하나에 약 6초. 맞는 어댑터가 끼워짐 | 값이 저장된 예측과 다르다. 문항 × 속성 8쌍(34칸)에서 저장된 예측과의 거리 평균 0.079 (같다고 보는 기준은 0.005, 서로 다른 어댑터끼리가 0.018). 양자화 때문인지 다른 원인이 남았는지는 가리지 못했다 |
+
+### GPU에서 원래 정밀도로 (`live`)
+
+```bash
+# NVIDIA GPU가 있으면 먼저 그 PC의 CUDA에 맞는 torch를 깐다 (pytorch.org의 설치 명령)
+cd backend
+python -m suwon_chat.live_check          # 빠른 점검: 어댑터마다 문항 × 속성 24쌍. 모델(약 16GB)을 처음 내려받는다
+python -m suwon_chat.live_check --all    # 전부. 시연에 쓰기 전에 한 번은 돌린다
+PREDICT_BACKEND=live python -m uvicorn suwon_chat.api:app --port 8000
+#   윈도우 PowerShell:  $env:PREDICT_BACKEND="live"; python -m uvicorn suwon_chat.api:app --port 8000
+```
+
+| 장비 | 올리는 방법 |
+|---|---|
+| NVIDIA GPU, 메모리 16GB 이상 | 그대로 |
+| NVIDIA GPU, 메모리 8~12GB | `LIVE_4BIT=1` (`pip install bitsandbytes`). 값이 조금 달라진다 |
+| Apple Silicon(`mps`) · Intel GPU(`xpu`), 메모리 32GB 이상 | 그대로. 돌려 보지 못했다 |
+| GPU 없음 | `gguf`를 쓴다 |
+
+- `live_check`는 칸마다 저장된 예측과의 거리를 재서 세 가지를 본다: 어댑터 예측이 같은가, 학습 전 모델 예측이 같은가, 맞는 어댑터가 끼워졌는가. "실패"가 나오면 시연에 쓰지 않는다.
+- 서버는 모델을 다 올린 뒤에 뜬다. 장치와 메모리는 가중치를 읽기 전에 검사하고, 문제가 있으면 대처법과 함께 알린다.
+- 윈도우에서 `pip install -r requirements.txt`로 깔리는 torch는 CPU용이다. NVIDIA GPU가 있어도 CUDA용 torch를 따로 깔아야 GPU를 쓴다.
+- 인터넷이 없는 곳에서는 모델을 미리 받아 둔 뒤 `HF_HUB_OFFLINE=1`을 준다.
+
+### GPU 없이 양자화 모델로 (`gguf`)
+
+```bash
+pip install llama-cpp-python==0.3.36 --only-binary :all: --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+cd backend
+python -m suwon_chat.quantized --download        # 양자화 모델(약 4.9GB)을 models/ 로 받는다
+python -m suwon_chat.live_check --backend gguf --pairs 8 --adapter exp1    # 저장된 예측과 얼마나 다른지 잰다 (약 5분)
+PREDICT_BACKEND=gguf python -m uvicorn suwon_chat.api:app --port 8000
+```
+
+- 모델은 Bllossom 팀이 올린 4비트 파일이다. RAM이 넉넉하면 `GGUF_REPO`·`GGUF_FILE`로 8비트 파일(8.5GB)을 고를 수 있다. 값이 더 가까워지는지는 재 보지 못했다.
+- 한 장면을 처음 볼 때는 집단마다 어댑터와 학습 전 모델을 한 번씩 돌린다(집단 3개면 약 40초, 7개면 1분 반). 다시 볼 때는 바로 나온다. 서버가 뜨면 추천 질문의 장면을 뒤에서 미리 돌려 둔다.
+- 어댑터는 llama.cpp 형식으로 바꿔 둔 `adapters/exp*/adapter.gguf`를 쓴다. 새로 바꿀 때는 `pip install gguf` 뒤 `python scripts/convert_adapters_gguf.py`.
+
+## 대화 모델
+
+답변 문장은 Claude API가 쓴다. 숫자는 대화 모델이 만들지 않고, 앱 서버가 계산한 값을 도구로 받아 쓴다. 차트의 숫자는 대화 모델을 거치지 않는다.
+
+- 기본 모델은 요금이 가장 낮은 `claude-haiku-5-5`다. `.env`의 `CHAT_MODEL` 값만 바꾸면 상위 모델로 돈다.
+- **키가 없거나 인터넷이 끊기면** 추천 질문은 미리 저장해 둔 답변(`backend/suwon_chat/saved_answers.json`)으로 나오고 화면에 "저장된 답변"이라고 표시된다. 차트와 참고 문서는 그대로 나온다. 직접 입력한 질문은 안내 문구로 끝난다.
+- 저장된 답변을 새로 받으려면 서버를 띄운 채 `python scripts/save_answers.py`를 돌린다(요금이 든다). 받은 뒤에는 사람이 읽고 다듬는다.
+- 끊긴 상황을 미리 보려면 `ANTHROPIC_BASE_URL=http://127.0.0.1:9 python -m uvicorn suwon_chat.api:app --port 8001`.
+
+## 참고 문서
+
+`reports/*.md`는 시연용으로 만든 가상 보고서 12편이다. 숫자는 2023·2024년 수원서베이 실측에서만 가져왔다(12편의 숫자 949개를 실측과 대조했다).
+
+- 형식: 머리말(`id`, `title`, `summary`, `topics`, `questions`)과 `<!-- page N -->`으로 나눈 쪽. 제목이 `[시연용 가상 문서]`로 시작하면 화면에 가상 문서로 표시된다.
+- 예측을 보여 줄 때는 머리말의 `questions`에 그 문항이 적힌 문서를 띄우고(`"q189"`는 그 변수, `"q132_"`는 q132_로 시작하는 변수 모두), 대화 모델에 그 문서를 주어 해석에 인용하게 한다. "관련 보고서 있어?"처럼 직접 물을 때는 임베딩 검색(`intfloat/multilingual-e5-small`, 로컬)으로 찾는다.
+- 문서를 고치거나 더하면 `python -m suwon_chat.reports`로 색인을 다시 만들고 서버를 다시 켠다.
+- 가상 보고서를 쓸 때는 `python scripts/stats_2324.py`로 숫자를 찾는다. 2025년 자료는 보여 주지 않는다.
 
 ## 테스트
 
 ```bash
 cd backend
-python -m pytest -q tests
+python -m pytest -q tests          # API 키도 GPU도 필요 없다
 ```
 
-칸 단위 오차를 정리본 결과표(`01_결과표/*/칸단위.csv`)의 값과 견준다. 대화 테스트는 가짜 클라이언트를 쓰므로 API 키가 없어도 된다.
+- 앱이 계산한 칸 단위 오차를 정리본 결과표의 값과 견준다.
+- 실시간 버전의 프롬프트를 평가용 프롬프트와 글자 단위로 견주고, 모델 올리기·어댑터 교체·확률 계산을 작은 무작위 모델로 확인한다.
+- 실제 대화 모델의 답변은 서버를 띄운 채 `python scripts/check_answers.py 3`으로 본다(요금이 든다). 추천 질문을 3번씩 돌려 답변 속 숫자가 도구 결과나 참고 문서에 있는 값인지 확인한다.
 
-실제 대화 모델의 답변은 따로 확인한다. 서버를 띄운 채로:
+## 설정 (`.env` 또는 환경 변수)
 
-```bash
-python scripts/check_answers.py 3  # 추천 질문을 3번씩 돌려 답변 속 숫자가 도구 결과에 있는 값인지 본다 (요금이 든다)
-```
-
-## 실시간 버전 (Bllossom을 직접 돌린다)
-
-기본은 **조회 버전**이다. 연구실 GPU 서버에서 미리 계산해 정리본에 저장해 둔 예측을 `data/suwon.db`에서 꺼내 보여 준다. GPU가 필요 없다.
-
-**실시간 버전**은 기본 모델(`MLP-KTLim/llama-3-Korean-Bllossom-8B`)을 이 PC에 올리고, `adapters/`의 LoRA 어댑터 세 개를 갈아 끼우며 질문마다 직접 추론한다. 화면의 "사전 계산" 표시가 "실시간"으로 바뀌고, 목록에 없는 새 문항도 물어볼 수 있다(실측이 없으므로 "실험적"으로 표시된다).
-
-### 필요한 장비
-
-| 장비 | 올리는 방법 | 비고 |
+| 이름 | 기본값 | 뜻 |
 |---|---|---|
-| NVIDIA GPU, 메모리 16GB 이상 | 그대로 | 저장된 예측과 거의 같은 값이 나온다. 질문 하나에 몇 초 |
-| NVIDIA GPU, 메모리 8~12GB | `LIVE_4BIT=1` (`pip install bitsandbytes`) | 4비트로 줄여 올린다. 값이 조금 달라진다 |
-| Apple Silicon, 메모리 32GB 이상 | 그대로 (`mps`) | 돌려 보지 못했다. bfloat16에서 오류가 나면 `LIVE_DTYPE=float16` (값이 조금 달라진다) |
-| Intel GPU (`xpu`) | 그대로 | 정리본의 `predict_local.py`가 쓴 방식. 돌려 보지 못했다 |
-| GPU 없음, RAM 32GB 이상 | 그대로 (`cpu`) | 된다고 해도 질문 하나에 수십 초~몇 분 |
-| RAM 16GB 이하이고 GPU도 없음 | 안 된다 | 조회 버전을 쓴다 |
-
-모델 가중치는 약 16GB이고 처음 한 번 허깅페이스에서 내려받는다(`~/.cache/huggingface`).
-
-### 순서
-
-```bash
-# 1. 저장소를 받고 패키지를 깐다 (README 맨 위의 "준비"와 같다)
-conda create -n llm python=3.12 && conda activate llm
-pip install -r requirements.txt          # NVIDIA GPU가 있으면 먼저 그 PC의 CUDA에 맞는 torch를 깐다 (pytorch.org)
-
-# 2. 색인을 만든다
-cd backend
-python -m suwon_chat.build_index
-python -m suwon_chat.reports
-
-# 3. 실시간 예측이 저장된 예측과 같은 값을 내는지 확인한다 (모델을 처음 내려받는다)
-python -m suwon_chat.live_check          # 빠른 점검: 어댑터마다 문항 × 속성 24쌍
-python -m suwon_chat.live_check --all    # 전부(어댑터마다 3,729칸). 시연에 쓰기 전에 한 번은 돌린다
-
-# 4. 서버를 실시간 모드로 띄운다. .env 에 PREDICT_BACKEND=live 를 적어도 된다
-PREDICT_BACKEND=live python -m uvicorn suwon_chat.api:app --port 8000
-#   윈도우 PowerShell:  $env:PREDICT_BACKEND="live"; python -m uvicorn suwon_chat.api:app --port 8000
-```
-
-- `live_check`는 칸마다 저장된 예측과 실시간 예측 사이의 거리를 재서 세 가지를 본다: 어댑터 예측이 같은가, 학습 전 모델 예측이 같은가, 맞는 어댑터가 끼워졌는가. "실패"가 나오면 실시간 버전을 시연에 쓰지 않는다. 정리본은 GPU 종류만 달라도 칸당 오차 평균이 0.0025쯤 달라진다고 적었고, 통과 기준은 칸별 거리 평균 0.005다. 4비트로 올리면 기준을 넘을 수 있다.
-- 서버는 모델을 다 올린 뒤에 뜬다. 올리지 못하면 이유와 대처법을 적고 멈춘다. 장치와 메모리는 가중치를 읽기 전에 검사한다.
-- GPU를 찾지 못하면 경고를 내고 CPU로 돌린다. 윈도우에서 `pip install -r requirements.txt`로 깔리는 torch는 CPU용이라, NVIDIA GPU가 있어도 CUDA용 torch를 따로 깔아야 GPU를 쓴다.
-- 허깅페이스에서 받는 판은 `LIVE_BASE_REVISION`으로 고정돼 있다(어댑터를 학습한 가중치). 인터넷이 없는 곳에서는 미리 받아 둔 뒤 `HF_HUB_OFFLINE=1`을 주거나 `LIVE_BASE_MODEL`에 받아 둔 폴더를 적는다.
-- 서버가 뜨면 추천 질문의 장면을 뒤에서 미리 돌려 둔다.
-- 한 장면을 처음 볼 때 어댑터, 학습 전 모델, (집단·문항 제외 어댑터면) 전체 학습 어댑터를 차례로 돌린다. 같은 장면을 다시 보면 저장해 둔 값을 쓴다.
-- 새 문항은 채팅에서 문항 문구와 보기(2~11개)를 함께 주면 된다. '잘 모르겠다' 같은 척도 밖 보기는 평균에서 뺀다. 예: `'수원시에 AI 행정 서비스가 도입되면 이용하시겠습니까?' 보기는 전혀 이용하지 않겠다, 이용하지 않는 편이다, 보통이다, 이용하는 편이다, 적극 이용하겠다. 연령별로 예측해 줘`
-
-**이 버전은 실제 모델로 돌려 확인하지 못했다.** 만든 PC에 GPU가 없고 RAM이 7GB여서다. 확인한 것은 (1) 프롬프트가 정리본의 평가용 프롬프트 11,187개와 글자 하나까지 같다는 것, (2) 실제 Bllossom 토크나이저에서 보기 글자 토큰이 정리본의 계산과 같게 잡힌다는 것, (3) 계산 순서와 정밀도(bfloat16 로짓, float32 softmax)가 정리본의 코드·저장된 값과 같다는 것(독립 리뷰), (4) 무작위 가중치의 작은 모델로 모델 올리기·어댑터 갈아 끼우기·확률 계산·서버·화면이 끝까지 돈다는 것이다. 실제 값이 맞는지는 3번의 `live_check`가 처음으로 확인한다.
-
-작은 모델로 배선만 확인하려면: `python tests/tiny.py /tmp/tiny` 뒤 `LIVE_BASE_MODEL=/tmp/tiny/base SUWON_ADAPTER_DIR=/tmp/tiny/adapters LIVE_DTYPE=float32 PREDICT_BACKEND=live python -m uvicorn suwon_chat.api:app --port 8010` (예측값은 뜻이 없다).
-
-## 참고 문서
-
-`reports/*.md`는 시연용으로 만든 가상 보고서다. 숫자는 2023·2024년 수원서베이 실측에서만 가져왔고, 예측에는 쓰이지 않는다.
-
-- 형식: 머리말(`id`, `title`, `summary`, `topics`, `questions`)과 `<!-- page N -->`으로 나눈 쪽. 제목이 `[시연용 가상 문서]`로 시작하면 화면에 가상 문서로 표시된다.
-- 문서를 고치거나 더하면 `python -m suwon_chat.reports`로 색인을 다시 만들고 서버를 다시 켠다.
-- 검색은 로컬 임베딩 모델(`intfloat/multilingual-e5-small`)로 한다.
-- 예측 옆에 띄울 문서는 두 가지를 겹쳐 고른다. 머리말의 `questions`에 그 문항이 적힌 문서가 있으면 그 문서를 띄우고(`"q189"`는 그 변수, `"q132_"`는 q132_로 시작하는 변수 모두), 쪽은 임베딩으로 가까운 것을 고른다. 어느 문서에도 적히지 않은 문항은 임베딩 유사도가 0.91을 넘는 문서가 있을 때만 띄운다. 임베딩만 썼을 때 무관한 문서가 뜨거나 정작 그 항목을 다룬 쪽이 빠지는 일이 있어서다.
-- "관련 보고서 있어?"처럼 사용자가 직접 물을 때의 검색은 임베딩만 쓰고, 유사도 0.87 미만이면 관련 문서가 없다고 답한다 (`backend/suwon_chat/reports.py`의 문턱 값들).
-- 가상 보고서를 쓸 때는 `python scripts/stats_2324.py`로 숫자를 찾는다. 2025년 자료는 보여 주지 않는다.
-
-## 저장된 답변
-
-대화 모델을 쓸 수 없을 때(키 없음, 인터넷 끊김) 추천 질문은 `backend/suwon_chat/saved_answers.json`의 글을 대신 내보내고 화면에 "저장된 답변"이라고 표시한다. 차트와 참고 문서는 그때 다시 계산한다.
-
-```bash
-python scripts/save_answers.py     # 추천 질문을 실제로 돌려 새로 저장한다 (요금이 든다). 저장한 뒤 사람이 읽고 고친다
-```
-
-끊긴 상황을 미리 보려면 `ANTHROPIC_BASE_URL=http://127.0.0.1:9 scripts/serve.sh 8001`로 서버를 하나 더 띄운다.
-
-## 설정
-
-| 환경 변수 | 기본값 | 뜻 |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | (없음) | 대화 모델 키. 없으면 채팅만 꺼지고 패널은 돈다 |
-| `CHAT_MODEL` | `claude-haiku-5-5` | 대화 모델. 값만 바꾸면 상위 모델로 돈다 |
-| `CHAT_EFFORT` | `low` | 사고 깊이 (`low` · `medium` · `high`) |
+| `ANTHROPIC_API_KEY` | (없음) | 대화 모델 키 |
+| `CHAT_MODEL` · `CHAT_EFFORT` | `claude-haiku-5-5` · `low` | 대화 모델과 사고 깊이 |
+| `PREDICT_BACKEND` | `lookup` | `lookup` · `live` · `gguf` |
+| `LIVE_BASE_MODEL` · `LIVE_DEVICE` · `LIVE_DTYPE` · `LIVE_4BIT` · `LIVE_BATCH` | Bllossom 8B · (자동) | `live`의 모델, 장치(`cuda`·`mps`·`xpu`·`cpu`), 정밀도, 4비트 여부, 묶음 크기 |
+| `GGUF_MODEL` · `GGUF_REPO` · `GGUF_FILE` · `GGUF_THREADS` | `./models/…Q4_K_M.gguf` | `gguf`의 모델 파일, 받을 곳, CPU 스레드 수 |
+| `SUWON_ADAPTER_DIR` | `./adapters` | 어댑터 폴더 |
 | `SUWON_SOURCE_DIR` | 정리본 폴더가 있으면 그것, 없으면 `./source_data` | 원본 자료 폴더 |
-| `SUWON_DB_PATH` | `./data/suwon.db` | 색인 DB |
-| `SUWON_REPORTS_DIR` | `./reports` | 참고 문서 폴더 |
-| `PREDICT_BACKEND` | `lookup` | `lookup` 저장된 예측 조회 · `live` 모델을 직접 돌림 |
-| `LIVE_BASE_MODEL` | `MLP-KTLim/llama-3-Korean-Bllossom-8B` | 기본 모델. 미리 받아 둔 폴더 경로도 된다 |
-| `SUWON_ADAPTER_DIR` | `./adapters` | `exp1` · `exp2` · `exp3` 어댑터 폴더가 든 곳 |
-| `LIVE_DEVICE` · `LIVE_DTYPE` · `LIVE_4BIT` · `LIVE_BATCH` | (자동) | 장치(`cuda`·`mps`·`cpu`), 정밀도, 4비트 여부, 한 번에 돌릴 프롬프트 수 |
+| `SUWON_DB_PATH` · `SUWON_REPORTS_DIR` | `./data/suwon.db` · `./reports` | 색인 DB, 참고 문서 폴더 |
 
 ## 폴더
 
 ```
 backend/suwon_chat/
-  build_index.py   정리본 → 로컬 DB, 자체 점검
+  build_index.py   원본 자료 → 로컬 DB, 자체 점검
   store.py         DB를 읽어 메모리에 올린다
   metrics.py       오차(WD·TV)와 평균. WD는 정리본의 함수를 그대로 옮겼다
-  predict.py       예측 백엔드 (지금은 저장된 예측을 조회하는 것 하나)
-  service.py       화면과 대화 LLM에 줄 자료. 화면의 숫자는 모두 여기서 나온다
-  scenarios.json   추천 질문 (이 파일만 고치면 버튼이 바뀐다)
+  service.py       화면과 대화 모델에 줄 자료. 화면의 숫자는 모두 여기서 나온다
+  predict.py       조회 백엔드 (저장된 예측)
   prompt.py        모델에 주는 프롬프트 (학습·평가에 쓴 형식 그대로)
-  live.py          실시간 예측 백엔드 (Bllossom + LoRA 어댑터),  live_check.py  저장된 예측과 비교
+  live.py          실시간 백엔드 (GPU, transformers + PEFT)
+  quantized.py     양자화 백엔드 (CPU, llama.cpp)
+  live_check.py    실시간·양자화 예측을 저장된 예측과 비교
   reports.py       참고 문서 색인과 검색 (로컬 임베딩)
-  saved.py         저장된 답변 내보내기,  saved_answers.json  저장된 답변
-  chat.py          대화 LLM (Claude API)과 도구
+  chat.py          대화 모델(Claude API)과 도구
+  saved.py         저장된 답변,  saved_answers.json · scenarios.json
   api.py           앱 서버
 frontend/src/      화면 (React + TypeScript). 차트는 라이브러리 없이 직접 그렸다
 source_data/       앱이 읽는 원본 자료 (정리본에서 필요한 파일만 고른 것)
-adapters/          LoRA 어댑터 세 개 (exp1 · exp2 · exp3)
+adapters/          LoRA 어댑터 세 개 (safetensors와 llama.cpp용 gguf)
 reports/           시연용 가상 보고서 12편
-scripts/           서버 실행, 답변 확인·저장, 2023·2024년 실측 조회
-docs/PRD.md        요구사항
+scripts/           서버 실행, 답변 확인·저장, 어댑터 변환, 자료 묶음 만들기
+docs/PRD.md        요구사항과 설계 결정
 ```
+
+## 자료와 출처
+
+- 설문 자료는 수원서베이 2023~2025년의 **집단별 집계**다. 개인 단위 응답은 들어 있지 않다.
+- 기본 모델: [MLP-KTLim/llama-3-Korean-Bllossom-8B](https://huggingface.co/MLP-KTLim/llama-3-Korean-Bllossom-8B)
+- 학습 방법: SubPOP (UC Berkeley Canny Lab)

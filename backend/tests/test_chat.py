@@ -148,7 +148,7 @@ def test_system_prompt_lists_every_question_and_the_limits(service):
     prompt = system_prompt(service)
     for q in service.store.target_questions:
         assert q.qkey in prompt
-    for phrase in ["교차 집단", "연도에 따른 변화", "새 문항", "원인을 설명하지 않는다", "집단 사이의 차이를 과장하지 않는다",
+    for phrase in ["교차 집단", "연도에 따른 변화", "새 문항", "모델의 이유는 지어내지 않는다", "집단 사이의 차이를 과장하지 않는다",
                    "표본이 적은 집단", "전체 학습 어댑터"]:
         assert phrase in prompt
 
@@ -245,3 +245,19 @@ def test_compare_choice_is_passed_to_the_panel_when_it_makes_sense(service):
     # 작년에 같은 문항이 없으면 작년 비교를 켜지 않는다
     no_history = {"qkey": "q74_W2025", "attribute": "SEX", "adapter": "exp1", "compare": "last_year"}
     assert _compare_for(service, no_history) == "actual"
+
+
+def test_question_keys_are_removed_from_the_answer_text(service):
+    """문항 키가 답변에 새어 나오면 글이 나가기 전에 지운다. 조각 사이에 걸쳐 와도 지운다."""
+    from suwon_chat.chat import KeyFilter
+    def run(chunks):
+        f = KeyFilter()
+        return "".join(f.feed(c) for c in chunks) + f.flush()
+    assert run(["일자리 지원 문항(q132_1)을 점유형태별로 봤습니다."]) == "일자리 지원 문항을 점유형태별로 봤습니다."
+    assert run(["자부심 문항(q1", "38_W2025)을 보면"]) == "자부심 문항을 보면"
+    assert run(["문항 ", "q189", " 은 0~10점입니다. 평균 5.47점, 7점 척도"]) == "문항 은 0~10점입니다. 평균 5.47점, 7점 척도"
+    assert run(["오차는 0.36점(WD 0.036)입니다.", " 2024년 5.8점"]) == "오차는 0.36점(WD 0.036)입니다. 2024년 5.8점"      # 숫자와 괄호는 건드리지 않는다
+    assert run(["Q4_K_M, exp1, quality"]) == "Q4_K_M, exp1, quality"
+    client = FakeClient([{"text": ["경제·사회적 위치 문항(q189", "_W2025)을 봤습니다."]}])
+    events = collect(client, service, [{"role": "user", "content": "보여 줘"}])
+    assert "".join(d["delta"] for e, d in events if e == "text") == "경제·사회적 위치 문항을 봤습니다."

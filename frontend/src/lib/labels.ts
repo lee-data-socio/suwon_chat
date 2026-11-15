@@ -32,11 +32,21 @@ export function setLive(info: LiveInfo | null | undefined, live: boolean) {
 /** 앱 서버가 예측을 그때그때 모델을 돌려 만드는가 */
 export const isLiveMode = () => liveMode;
 
-/** '사전 계산'·'실시간' 표시에 마우스를 올렸을 때 나오는 설명 */
+/** 예측의 출처 표시: 사전 계산 · 실시간 · 실시간(양자화). 양자화 모델의 값은 저장된 예측과 조금 다르므로 따로 밝힌다 */
+export function sourceLabel(live: boolean): string {
+  if (!live) return "사전 계산";
+  return liveInfo?.quantized ? "실시간 · 양자화" : "실시간";
+}
+
+/** 출처 표시에 마우스를 올렸을 때 나오는 설명 */
 export function sourceTitle(live: boolean): string {
   if (!live) return "미리 계산해 저장해 둔 예측이다. 모델을 지금 돌린 값이 아니다.";
   if (!liveInfo) return "모델을 지금 돌려 얻은 예측이다.";
   const name = liveInfo.base_model.split("/").filter(Boolean).pop() ?? liveInfo.base_model;
-  const parts = [name, liveInfo.device, liveInfo.four_bit ? "4비트" : liveInfo.dtype, `어댑터 ${liveInfo.adapters.length}개`];
-  return `모델을 지금 돌려 얻은 예측이다. ${parts.join(" · ")}`;
+  const precision = liveInfo.dtype.includes("양자화") ? liveInfo.dtype : liveInfo.four_bit ? "4비트 양자화" : liveInfo.dtype;
+  const parts = [name, liveInfo.device, precision, `어댑터 ${liveInfo.adapters.length}개`];
+  const lead = liveInfo.quantized
+    ? "양자화한(가중치를 줄인) 모델을 지금 돌려 얻은 예측이다. 저장된 예측과 값이 조금 다르다."
+    : "모델을 지금 돌려 얻은 예측이다.";
+  return `${lead} ${parts.join(" · ")}`;
 }

@@ -23,11 +23,20 @@ MESSAGE_CHARS = 8000     # 메시지 하나의 최대 길이. 넘으면 뒤를 �
 def normalize_history(history: list[dict]) -> list[dict]:
     """화면이 보낸 대화를 API가 받는 모양으로 다듬는다.
 
-    빈 메시지를 버리고, 너무 긴 것은 자르고, 오래된 것부터 버린 뒤, 맨 앞이 사용자 메시지가 되게 한다.
-    (API는 빈 글 블록과 assistant로 시작하는 대화를 받지 않는다.)
+    빈 메시지를 버리고, 너무 긴 것은 자르고, 같은 쪽이 연달아 말한 것은 하나로 합치고,
+    오래된 것부터 버린 뒤, 맨 앞이 사용자 메시지가 되게 한다.
+    (API는 빈 글 블록과 assistant로 시작하는 대화를 받지 않는다. 답변이 오류로 끝난 질문 뒤에
+    새 질문이 오면 사용자 메시지가 연달아 생기는데, 이것도 합쳐서 번갈아 말하는 모양으로 만든다.)
     """
-    out = [{"role": m["role"], "content": m["content"].strip()[:MESSAGE_CHARS]}
-           for m in history if m.get("content", "").strip()]
+    out: list[dict] = []
+    for m in history:
+        text = m.get("content", "").strip()[:MESSAGE_CHARS]
+        if not text:
+            continue
+        if out and out[-1]["role"] == m["role"]:
+            out[-1]["content"] = f"{out[-1]['content']}\n\n{text}"[-MESSAGE_CHARS:]
+        else:
+            out.append({"role": m["role"], "content": text})
     out = out[-HISTORY_MESSAGES:]
     while out and out[0]["role"] != "user":
         out.pop(0)

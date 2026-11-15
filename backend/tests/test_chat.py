@@ -215,3 +215,11 @@ def test_truncated_text_answer_says_so(service):
 def test_question_key_is_restricted_to_the_catalogue(service):
     props = {t["name"]: t for t in tools(service)}["get_prediction"]["input_schema"]["properties"]
     assert len(props["qkey"]["enum"]) == 113 and "q189_W2025" in props["qkey"]["enum"]
+
+
+def test_consecutive_messages_from_the_same_side_are_merged():
+    from suwon_chat.chat import normalize_history
+    # 첫 질문의 답변이 오류로 끝나 비어 있으면 사용자 메시지가 연달아 온다
+    out = normalize_history([{"role": "user", "content": "첫 질문"}, {"role": "assistant", "content": ""},
+                             {"role": "user", "content": "둘째 질문"}])
+    assert out == [{"role": "user", "content": "첫 질문\n\n둘째 질문"}]

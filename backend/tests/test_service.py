@@ -216,3 +216,27 @@ def test_brief_numbers_equal_panel_numbers(service):
         assert row["예측_평균"] == round(g["predicted_mean"], 2)
         assert row["평균_차이_예측_빼기_실측"] == round(g["predicted_mean"] - g["actual_mean"], 2)
         assert row["분포_오차_읽기"] == f"7점 척도에서 약 {g['error'] * 6:.2f}점"
+
+
+def test_brief_states_direction_and_group_order_in_words(service):
+    # q115는 1 = 매우 좋다. 예측 평균이 더 높으면 '매우 나쁘다' 쪽이다.
+    p = service.prediction("q115_W2025", "RELIGION", "exp1")
+    b = service.prediction_brief("q115_W2025", "RELIGION", "exp1")
+    for row, g in zip(b["집단별"], p["groups"]):
+        diff = g["predicted_mean"] - g["actual_mean"]
+        if abs(diff) >= 0.005:
+            assert ("높다" in row["평균_비교"]) == (diff > 0)
+            assert ("'매우 나쁘다' 쪽" in row["평균_비교"]) == (diff > 0)
+            assert f"{abs(diff):.2f}점" in row["평균_비교"]
+    order = b["집단_순서"]
+    assert order["예측"] == [g["group"] for g in sorted(p["groups"], key=lambda g: -g["predicted_mean"])]
+    assert order["실측"] == [g["group"] for g in sorted(p["groups"], key=lambda g: -g["actual_mean"])]
+    assert order["순서가_완전히_같음"] == (order["예측"] == order["실측"])
+    assert b["집단_수"] == len(p["groups"])
+
+
+def test_group_order_flag_is_true_only_for_identical_order(service):
+    same = service.prediction_brief("q189_W2025", "TENURE", "exp1")["집단_순서"]
+    assert same["순서가_완전히_같음"] is True and same["예측"] == same["실측"]
+    diff = service.prediction_brief("q120_1_W2025", "AGE", "exp3")["집단_순서"]
+    assert diff["순서가_완전히_같음"] is False and diff["예측"] != diff["실측"]

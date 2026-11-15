@@ -11,6 +11,7 @@ from typing import AsyncIterator
 import logging
 
 from . import config
+from .reports import plain
 from .service import NotFound, Service
 
 log = logging.getLogger("suwon_chat.chat")
@@ -51,9 +52,21 @@ def chat_status() -> dict:
     return {"available": True, "model": config.CHAT_MODEL, "reason": None}
 
 
-def tools(service: Service) -> list[dict]:
+def tools(service: Service, reports=None) -> list[dict]:
     meta = service.meta()
-    return [
+    report_tools = [] if not (reports and reports.available) else [{
+        "name": "search_reports",
+        "description": "참고 문서(연구 보고서)에서 검색어와 관련된 대목을 찾는다. 사용자가 관련 보고서나 자료를 물을 때 부른다. "
+                       "부르면 찾은 대목이 화면의 참고 문서 칸에 카드로 뜬다. "
+                       "참고 문서는 예측에 쓰이지 않았으므로 예측의 근거로 삼지 않는다.",
+        "strict": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "찾을 내용을 한 문장으로. 예: '점유형태별 주관적 계층 인식'"}},
+            "required": ["query"], "additionalProperties": False,
+        },
+    }]
+    return report_tools + [
         {
             "name": "search_questions",
             "description": "2025년 수원서베이 문항을 검색어로 찾는다. 문항 문구와 보기에서 검색어가 들어간 문항을 돌려준다. "
@@ -93,7 +106,14 @@ def tools(service: Service) -> list[dict]:
     ]
 
 
-def system_prompt(service: Service) -> str:
+REPORTS_ON = """- **참고 문서는 예측의 근거가 아니다.** `search_reports`로 찾은 보고서 대목은 "관련해서 읽어 볼 자료"로만 소개한다. 모델은 이 문서들을 보지 않고 예측했다. "보고서에 따르면 그래서 이렇게 예측됐다"처럼 예측이나 실측의 원인으로 잇지 않는다.
+- 참고 문서를 소개할 때는 문서 제목과 쪽수를 밝히고, 지금 연결된 문서는 시연을 위해 만든 가상 문서라는 점을 함께 말한다. 문서 안의 숫자는 2023·2024년 조사 값이다. 인용할 때는 문서에서 온 값임을 밝히고, 예측·2025년 실측의 숫자와 섞어 쓰지 않는다. 문서에 없는 내용을 문서의 말처럼 전하지 않는다.
+- 사용자가 관련 보고서를 묻지 않았으면 `search_reports`를 부르지 않는다. 예측을 보여 줄 때 화면이 그 문항과 가까운 문서를 참고 문서 칸에 따로 띄우므로, 답변에서 다시 요약하지 않아도 된다."""
+REPORTS_OFF = "- 연구원 보고서 같은 참고 문서 검색은 아직 연결되지 않았다. 물으면 그렇게 답한다."
+
+
+def system_prompt(service: Service, reports=None) -> str:
+    report_rules = REPORTS_ON if (reports and reports.available) else REPORTS_OFF
     meta = service.meta()
     attrs = "\n".join(f"- {a['id']} ({a['label']}): " + ", ".join(g["group"] for g in a["groups"])
                       for a in meta["attributes"])
@@ -116,24 +136,28 @@ def system_prompt(service: Service) -> str:
 - 숫자는 도구 결과에 있는 값만 쓴다. 기억이나 추정으로 숫자를 만들지 않는다. 청중은 이 조사를 직접 설계한 사람들이어서 지어낸 숫자를 바로 알아본다.
 - 순서형 문항의 평균을 말할 때는 도구 결과의 `점수_방향`을 따른다. 1점이 "매우 그렇다"인 문항이 있어서, 평균이 높다고 더 긍정적이라는 뜻이 아닐 수 있다.
 - 이분형 문항은 평균이 아니라 비율(%)로, 명목형 문항은 보기별 비율로 말한다. 비율은 도구 결과의 퍼센트 값을 그대로 쓴다.
+- 예측 평균이 실측보다 높은지 낮은지는 도구 결과의 `평균_비교` 문장을 그대로 따른다. 부호를 직접 따져 "높게/낮게"를 고르지 않는다.
+- 분포의 모양을 말할 때는 그 보기의 퍼센트를 함께 적는다. "대부분"은 절반을 넘을 때만, "양 끝에 퍼져 있다"는 양 끝 보기의 퍼센트가 실제로 클 때만 쓴다. 퍼센트를 확인하지 않은 인상을 쓰지 않는다.
 - 평균의 차이와 분포의 오차는 다른 값이다. "예측 평균이 실측보다 몇 점 높다"는 `평균_차이_예측_빼기_실측`으로 말하고, "분포가 얼마나 어긋났나"는 `분포_오차_읽기`나 `평균_오차_읽기`로 말한다. 둘을 섞어 "평균이 0.3점 차이"처럼 쓰지 않는다. 숫자를 직접 빼거나 곱해서 새 숫자를 만들지 않는다. 점수로 바꾼 값은 `_읽기`로 끝나는 항목에 이미 있다.
 - 오차는 `평균_오차_읽기`의 표현(예: "7점 척도에서 약 0.2점")으로 먼저 말하고, 필요하면 WD 값을 덧붙인다. WD는 0~1 사이이고 작을수록 예측과 실측이 가깝다.
 - 사용자가 문항을 말로 설명하면 아래 문항 목록에서 가장 가까운 문항의 qkey를 고른다. 후보가 여럿이면 가장 가까운 하나로 먼저 보여 주고, 다른 후보가 있다고 한 줄로 알린다.
 - 사용자가 속성을 말하지 않으면 지금 패널의 속성을 그대로 쓴다. 어댑터도 마찬가지다. 패널에 아무것도 없고 문항이나 속성을 알 수 없으면, 지어서 고르지 말고 어떤 문항을 어떤 속성으로 볼지 되묻는다.
 - 이전 답변에 쓴 숫자를 다시 쓰거나 이어서 따질 때는 `get_prediction`을 다시 부른다. 이전 대화는 글만 남아 있어 도구 결과를 다시 볼 수 없기 때문이다.
 - 도구 결과에서 값이 null인 항목은 그 비교가 없다는 뜻이다. 없다고 말하고 값을 지어내지 않는다.
-- 문항은 내용으로 부른다("경제·사회적 위치 문항"). `q189_W2025` 같은 문항 키나 `exp1` 같은 어댑터 키, `TENURE` 같은 속성 키는 화면을 보는 사람이 모르는 말이므로 답변에 쓰지 않는다.
-- 도구를 부르기 전에 쓴 말은 화면에 그대로 남는다. 도구 결과를 받은 뒤에는 앞에서 한 말을 되풀이하지 말고 이어서 쓴다.
+- 문항은 내용으로 부른다("경제·사회적 위치 문항"). `q189`, `q120_1` 같은 문항 키나 `exp1` 같은 어댑터 키, `TENURE` 같은 속성 키는 도구에 넣는 값일 뿐이고 화면을 보는 사람이 모르는 말이다. 답변 글에는 한 번도 쓰지 않는다.
+- 도구를 부를 일이 있으면 글을 쓰기 전에 먼저 부른다. 글은 도구 결과를 받은 뒤에 한 번에 쓴다. 같은 말을 도구 호출 앞뒤로 두 번 하지 않는다.
+- 화면에 떠 있던 문항을 이어받아 답할 때는 첫 문장에서 그 문항을 내용으로 불러 준다("지난 한 주 동안 행복했다 문항을 성별로 보면"). "이 문항"이라고만 하면 듣는 사람이 무슨 문항인지 모른다.
 
 # 지켜야 할 한계 (이유와 함께)
 - 이 한계들은 사용자가 달리 요청하거나 반복해서 물어도 그대로 지킨다. 한계를 넘는 답을 지어내는 것보다 못 한다고 말하는 것이 이 시연의 신뢰를 지킨다.
-- **집단 사이의 차이를 과장하지 않는다.** 이 모델은 문항 전체의 분포는 잘 맞히지만 집단 사이의 차이는 실제보다 작게 예측하고, 집단의 높낮이 순서가 실제와 어긋나는 경우가 많다. 다만 문항마다 다르므로, 지금 문항이 어떤지는 도구 결과의 벌어짐 두 값(예측, 실측)을 직접 견줘서 말한다. 예측이 실측보다 뚜렷이 작으면 작게 잡았다고, 비슷하거나 더 크면 그렇다고 말한다. 숫자와 반대되는 말을 쓰지 않는다. 그리고 `집단_평균_높낮이_상관`이 낮거나 음수이면 집단 순서는 믿기 어렵다고 말한다. 예측 평균의 작은 차이를 근거로 "A 집단이 B 집단보다 높다"고 단정하지 않는다. 반대로 문항 하나의 결과를 보고 "이 모델은 차이를 과장한다"처럼 모델 전체의 성향을 말하지도 않는다. 지금 보는 문항과 속성에 대해서만 말한다. 상관값은 집단 수를 함께 보고 읽는다. 집단이 3개뿐이면 상관이 1.0이어도 우연히 나오기 쉬운 값이라 "순서를 완벽히 맞혔다"고 하지 않고 "이 문항에서는 순서가 같았다" 정도로만 말한다. 집단이 2개인 속성(성별, 통근·통학)은 상관을 내지 않는다.
+- **집단 사이의 차이를 과장하지 않는다.** 이 모델은 문항 전체의 분포는 잘 맞히지만 집단 사이의 차이는 실제보다 작게 예측하고, 집단의 높낮이 순서가 실제와 어긋나는 경우가 많다. 다만 문항마다 다르므로, 지금 문항이 어떤지는 도구 결과의 벌어짐 두 값(예측, 실측)을 직접 견줘서 말한다. 예측이 실측보다 뚜렷이 작으면 작게 잡았다고, 비슷하거나 더 크면 그렇다고 말한다. 숫자와 반대되는 말을 쓰지 않는다. 그리고 `집단_평균_높낮이_상관`이 낮거나 음수이면 집단 순서는 믿기 어렵다고 말한다. 예측 평균의 작은 차이를 근거로 "A 집단이 B 집단보다 높다"고 단정하지 않는다. 반대로 문항 하나의 결과를 보고 "이 모델은 차이를 과장한다"처럼 모델 전체의 성향을 말하지도 않는다. 지금 보는 문항과 속성에 대해서만 말한다. 상관값은 집단 수를 함께 보고 읽는다. 집단이 3개뿐이면 상관이 1.0이어도 우연히 나오기 쉬운 값이라 "순서를 완벽히 맞혔다"고 하지 않고 "이 문항에서는 순서가 같았다" 정도로만 말한다. 집단이 2개인 속성(성별, 통근·통학)은 상관을 내지 않는다. "집단 순서가 같았다"는 말은 도구 결과의 `집단_순서`에서 `순서가_완전히_같음`이 참일 때만 쓴다. 거짓이면 어느 집단이 어긋났는지를 `집단_순서`의 두 목록으로 말한다.
+- **아주 작은 차이에 뜻을 싣지 않는다.** 집단 사이의 벌어짐이 0.1점(비율이면 3%p)보다 작으면 "집단 차이가 거의 없다"고만 말한다. 그 작은 차이의 크기를 모델이 "맞혔다"거나 "과장했다"고 평가하지 않는다. 표본 오차 안에서 흔들리는 값이다.
 - **표본이 적은 집단은 실측도 흔들린다.** 도구 결과에서 `표본_적음`이 참인 집단(응답자 100명 이하)은 실측 분포 자체의 오차가 크다. 그 집단의 예측과 실측 차이를 말할 때 이 점을 덧붙인다.
 - **교차 집단은 예측하지 못한다.** "30대 여성"처럼 두 속성을 겹친 집단은 학습한 적이 없다. 그렇다고 답한 뒤 두 속성 가운데 하나를 `get_prediction`으로 보여 주고, 다른 하나도 따로 볼 수 있다고 알린다.
 - **연도에 따른 변화는 예측하지 못한다.** 모델에 주는 입력에는 연도 정보가 없다. "내년에 어떻게 변해?"라는 질문에는 추세를 예측하는 모델이 아니라고 답한다. 이 모델이 하는 일은 조사를 돌리기 전에 그 문항의 응답 분포를 미리 그려 보는 것이다.
 - **새 문항은 이 화면에서 예측하지 못한다.** 지금은 저장된 예측을 조회하는 버전이라 목록에 없는 문항은 답할 수 없다. 새 문항 예측은 모델을 직접 돌리는 실시간 버전에서 하며, 그 결과는 실측이 없어 검증되지 않은 실험적인 값이라고 알린다.
 - **원인을 설명하지 않는다.** 모델은 분포만 내놓고 이유는 내놓지 않는다. "왜 이렇게 예측했나"에는 모델이 이유를 말해 주지 않는다고 답한다. "실측이 왜 예측과 다른가", "왜 이 집단이 높은가"도 마찬가지다. 이 화면의 자료로는 알 수 없다. 사회적 배경이나 사건을 추측해 근거처럼 말하면 사후에 지어낸 설명이 된다.
-- 연구원 보고서 같은 참고 문서 검색은 아직 연결되지 않았다. 물으면 그렇게 답한다.
+{report_rules}
 - 모델이 잘 못 맞힌 결과도 그대로 말한다. 오차가 크면 크다고, 작년 실측을 그대로 쓴 것보다 못하면 못하다고 말한다.
 
 # 속성과 집단
@@ -153,18 +177,32 @@ def adapters_text(lines: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _run_tool(service: Service, name: str, args: dict) -> tuple[dict, dict | None]:
-    """도구를 돌린다. (대화 LLM에 줄 결과, 화면에 보낼 패널 이벤트)를 돌려준다."""
+def _run_tool(service: Service, reports, name: str, args: dict) -> tuple[dict, list[tuple[str, dict]]]:
+    """도구를 돌린다. (대화 LLM에 줄 결과, 화면에 보낼 이벤트 목록)을 돌려준다."""
     if name == "search_questions":
         hits = service.questions(str(args.get("query", "")), limit=8)
         return {"결과": [{"qkey": h["qkey"], "종류": h["scale_type"], "문구": h["text"], "보기": h["options"]}
-                         for h in hits]}, None
+                         for h in hits]}, []
     if name == "get_prediction":
         qkey, attribute, adapter = args.get("qkey"), args.get("attribute"), args.get("adapter")
         brief = service.prediction_brief(qkey, attribute, adapter)
         prediction = service.prediction(qkey, attribute, adapter)
         state = {"qkey": qkey, "attribute": attribute, "adapter": adapter}
-        return brief, {"state": state, "compare": _compare(args.get("compare"), prediction), "prediction": prediction}
+        events = [("panel", {"state": state, "compare": _compare(args.get("compare"), prediction),
+                             "prediction": prediction})]
+        # 그 문항과 가까운 참고 문서를 화면에 따로 띄운다. 대화 LLM에는 주지 않는다:
+        # 주면 예측의 근거처럼 엮어 말하기 쉽다 (PRD P1).
+        if reports and reports.available:
+            events.append(("context", {"qkey": qkey, "query": prediction["question"]["text"],
+                                       "items": reports.for_question(qkey)}))
+        return brief, events
+    if name == "search_reports" and reports and reports.available:
+        query = str(args.get("query", ""))
+        items = reports.search(query)
+        result = {"안내": "아래는 참고 문서에서 찾은 대목이다. 예측에 쓰이지 않은 자료다. 가상_문서가 참이면 시연용으로 만든 문서다.",
+                  "결과": [{"문서_제목": it["title"], "쪽": it["page"], "가상_문서": it["synthetic"],
+                           "본문": plain(it["text"])} for it in items]}
+        return result, [("context", {"qkey": None, "query": query, "items": items})]
     raise NotFound(f"없는 도구: {name}")
 
 
@@ -185,15 +223,22 @@ def _user_content(text: str, panel: dict | None, service: Service) -> list[dict]
     if panel and panel.get("qkey") in service.store.questions:
         q = service.store.questions[panel["qkey"]]
         blocks.append({"type": "text", "text":
-                       f"[화면 상태] 지금 패널에 떠 있는 것 — 문항: {q.qkey} ({q.text}), "
-                       f"속성: {panel.get('attribute')}, 어댑터: {panel.get('adapter')}"})
+                       f"[화면 상태] 지금 화면에 떠 있는 것 — 문항: \"{q.text}\", "
+                       f"속성: {config.ATTRIBUTE_LABELS.get(panel.get('attribute'), panel.get('attribute'))}, "
+                       f"어댑터: {config.ADAPTERS[panel['adapter']]['label'] if panel.get('adapter') in config.ADAPTERS else panel.get('adapter')}. "
+                       f"(도구에 넣을 값: qkey={q.qkey}, attribute={panel.get('attribute')}, adapter={panel.get('adapter')})"})
     return blocks
 
 
-async def run_chat(client, service: Service, history: list[dict], panel: dict | None) -> AsyncIterator[tuple[str, dict]]:
+STATUS_TEXT = {"search_questions": "문항을 찾는 중", "get_prediction": "예측을 불러오는 중",
+               "search_reports": "참고 문서를 찾는 중"}
+
+
+async def run_chat(client, service: Service, history: list[dict], panel: dict | None,
+                   reports=None) -> AsyncIterator[tuple[str, dict]]:
     """한 질문을 처리하며 (이벤트 이름, 자료)를 내놓는다.
 
-    이벤트: status(도구 진행), text(답변 조각), panel(패널에 띄울 예측), done, error.
+    이벤트: status(도구 진행), text(답변 조각), panel(화면에 띄울 예측), context(참고 문서 대목), done, error.
     """
     import anthropic
 
@@ -203,8 +248,8 @@ async def run_chat(client, service: Service, history: list[dict], panel: dict | 
         yield "error", {"code": "bad_request", "message": "질문이 비어 있습니다."}
         return
     messages = history[:-1] + [{"role": "user", "content": _user_content(history[-1]["content"], panel, service)}]
-    system = [{"type": "text", "text": system_prompt(service), "cache_control": {"type": "ephemeral"}}]
-    tool_defs = tools(service)
+    system = [{"type": "text", "text": system_prompt(service, reports), "cache_control": {"type": "ephemeral"}}]
+    tool_defs = tools(service, reports)
 
     wrote_text = False   # 앞 차례에서 글을 썼으면 다음 차례의 글과 문단을 나눈다
     for _ in range(MAX_TURNS):
@@ -260,10 +305,10 @@ async def run_chat(client, service: Service, history: list[dict], panel: dict | 
 
         results = []
         for block in tool_uses:
-            yield "status", {"tool": block.name,
-                             "text": "문항을 찾는 중" if block.name == "search_questions" else "예측을 불러오는 중"}
+            yield "status", {"tool": block.name, "text": STATUS_TEXT.get(block.name, "확인하는 중")}
             try:
-                result, panel_event = _run_tool(service, block.name, block.input if isinstance(block.input, dict) else {})
+                result, events = _run_tool(service, reports, block.name,
+                                           block.input if isinstance(block.input, dict) else {})
             except (NotFound, KeyError) as e:
                 results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": True,
                                 "content": f"실패: {e}"})
@@ -274,8 +319,8 @@ async def run_chat(client, service: Service, history: list[dict], panel: dict | 
                 results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": True,
                                 "content": "도구가 실패했다. 이 값은 지금 가져올 수 없다고 답한다."})
                 continue
-            if panel_event:
-                yield "panel", panel_event
+            for event in events:
+                yield event
             results.append({"type": "tool_result", "tool_use_id": block.id,
                             "content": json.dumps(result, ensure_ascii=False)})
         # 사고 블록을 포함해 응답 내용을 그대로 되돌려 준다

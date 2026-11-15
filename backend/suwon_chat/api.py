@@ -7,24 +7,29 @@
     GET  /api/questions    2025년 문항 목록 (?q= 검색어)
     GET  /api/prediction   문항 × 속성 × 어댑터의 예측·실측·오차 (?qkey=&attribute=&adapter=)
     GET  /api/scenarios    추천 질문
+    GET  /api/context      문항과 가까운 참고 문서 대목 (?qkey=)
+    GET  /api/reports      참고 문서 목록,  GET /api/reports/{doc_id}  문서 한 편의 쪽별 전문
     GET  /api/chat/status  대화 LLM을 쓸 수 있는지
     POST /api/chat         대화. 응답은 SSE(text/event-stream)이고 이벤트는
-                           status {tool,text} · text {delta} · panel {state,compare,prediction} · done {stop_reason} · error {code,message}
+                           status {tool,text} · text {delta} · panel {state,compare,prediction} · context {qkey,query,items} · done {stop_reason} · error {code,message}
 """
 from __future__ import annotations
 
 import json
 import logging
+import threading
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query
+import numpy as np
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import config
 from .chat import chat_status, run_chat
 from .predict import LookupBackend
+from .reports import LocalEmbedder, ReportIndex
 from .scenarios import SCENARIOS
 from .service import NotFound, Service
 from .store import Store
@@ -36,7 +41,31 @@ log = logging.getLogger("suwon_chat.api")
 async def lifespan(app: FastAPI):
     store = Store()
     app.state.service = Service(store, LookupBackend(store))
+    embedder = LocalEmbedder()
+    app.state.reports = ReportIndex(config.REPORTS_INDEX, config.REPORTS_VECTORS, _guarded(embedder))
+    if app.state.reports.available and config.WARM_EMBEDDER:
+        # 첫 검색이 느리지 않게 임베딩 모델을 미리 올려 둔다. 서버 시작은 기다리게 하지 않는다.
+        threading.Thread(target=_warm, args=(embedder,), daemon=True).start()
     yield
+
+
+def _warm(embedder: LocalEmbedder) -> None:
+    try:
+        embedder.load()
+    except Exception:
+        log.warning("임베딩 모델을 올리지 못했다. 문항별 참고 문서는 나오지만 자유 검색은 되지 않는다.", exc_info=True)
+
+
+def _guarded(embedder: LocalEmbedder):
+    """임베딩 모델을 못 쓰는 환경에서도 서버가 죽지 않게 한다. 검색 결과가 비어 나갈 뿐이다."""
+    def embed(texts, kind):
+        try:
+            return embedder(texts, kind)
+        except Exception:
+            log.warning("임베딩 실패. 검색 결과를 비워 돌려준다.", exc_info=True)
+            return np.zeros((len(texts), 1), np.float32)
+    embed.model_name = embedder.model_name
+    return embed
 
 
 app = FastAPI(title="수원서베이 시연 챗봇", lifespan=lifespan)
@@ -46,9 +75,36 @@ def svc() -> Service:
     return app.state.service
 
 
+def reports() -> ReportIndex:
+    return app.state.reports
+
+
 @app.get("/api/meta")
 def meta():
-    return svc().meta()
+    r = reports()
+    return {**svc().meta(), "reports": {"available": r.available, "count": len(r.documents)}}
+
+
+@app.get("/api/context")
+def context(qkey: str):
+    q = svc().store.questions.get(qkey)
+    if q is None or q.year != config.PREDICT_YEAR:
+        raise HTTPException(404, f"{config.PREDICT_YEAR}년 문항이 아니다: {qkey}")
+    r = reports()
+    return {"available": r.available, "query": q.text, "items": r.for_question(qkey)}
+
+
+@app.get("/api/reports")
+def report_list():
+    return reports().listing()
+
+
+@app.get("/api/reports/{doc_id}")
+def report(doc_id: str):
+    doc = reports().document(doc_id)
+    if doc is None:
+        raise HTTPException(404, f"없는 문서: {doc_id}")
+    return doc
 
 
 @app.get("/api/questions")
@@ -123,7 +179,8 @@ async def chat(req: ChatRequest):
         # 발표 중에 오래 매달리지 않게 한다. 연결 5초, 응답 60초, 재시도 1번.
         client = anthropic.AsyncAnthropic(timeout=anthropic.Timeout(60.0, connect=5.0), max_retries=1)
         try:
-            async for event, data in run_chat(client, svc(), [m.model_dump() for m in req.messages], panel):
+            async for event, data in run_chat(client, svc(), [m.model_dump() for m in req.messages], panel,
+                                              reports()):
                 yield _sse(event, data)
         except Exception:
             # 어떤 실패든 화면이 기다리기만 하지 않도록 error 이벤트로 끝낸다

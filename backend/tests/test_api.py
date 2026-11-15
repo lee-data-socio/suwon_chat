@@ -5,10 +5,11 @@ from suwon_chat import api
 
 
 @pytest.fixture()
-def client(service, monkeypatch):
+def client(service, report_index, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with TestClient(api.app) as c:
         api.app.state.service = service      # 테스트용으로 새로 색인한 DB를 쓴다
+        api.app.state.reports = report_index
         yield c
 
 
@@ -46,7 +47,7 @@ def test_chat_rejects_malformed_history(client):
 
 
 def _fake_run_chat(seen):
-    async def run(client, service, history, panel):
+    async def run(client, service, history, panel, reports=None):
         seen["panel"] = panel
         seen["history"] = history
         yield "done", {"stop_reason": "end_turn"}
@@ -77,7 +78,7 @@ def test_long_conversation_is_accepted(client, monkeypatch):
 def test_server_failure_ends_the_stream_with_an_error_event(client, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
-    async def broken(client, service, history, panel):
+    async def broken(client, service, history, panel, reports=None):
         yield "text", {"delta": "쓰다가"}
         raise RuntimeError("예상하지 못한 실패")
     monkeypatch.setattr(api, "run_chat", broken)

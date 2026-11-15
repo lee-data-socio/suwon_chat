@@ -14,8 +14,13 @@ numpy==2.5.4
 # 대화 LLM (Claude API)
 anthropic==2.8.0
 
+# 참고 문서 검색 (로컬 임베딩 모델 intfloat/multilingual-e5-small)
+# torch는 PC에 맞는 빌드를 쓴다. GPU가 없으면 CPU 빌드가 훨씬 가볍다:
+#   pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
+torch==2.15.0
+transformers==5.22.2
+
 # 테스트
 pytest==9.2.0
 
-# 실시간 예측(3단계: torch, transformers, peft)과 보고서 색인(2단계)에 쓰는 패키지는
-# 그 단계의 코드를 넣을 때 여기에 추가한다. torch는 PC의 GPU에 맞는 빌드로 따로 깐다.
+# 실시간 예측(3단계: peft 등)에 쓰는 패키지는 그 코드를 넣을 때 여기에 추가한다.

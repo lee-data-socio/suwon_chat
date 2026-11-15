@@ -213,6 +213,21 @@ class Service:
         }
 
     @staticmethod
+    def _mean_phrase(diff: float, scored: list) -> str:
+        if abs(diff) < 0.005:
+            return "예측 평균과 실측 평균이 같다"
+        side = scored[-1][0] if diff > 0 else scored[0][0]
+        return f"예측 평균이 실측보다 {abs(diff):.2f}점 {'높다' if diff > 0 else '낮다'} ('{side}' 쪽으로 치우침)"
+
+    @staticmethod
+    def _order(groups: list, predicted, actual, what: str) -> dict:
+        """집단을 값이 높은 순으로 세운 것. '순서가 같다'는 말은 이 값을 보고만 하게 한다."""
+        by_pred = [g["group"] for g in sorted(groups, key=predicted, reverse=True)]
+        by_actual = [g["group"] for g in sorted(groups, key=actual, reverse=True)]
+        return {"설명": f"{what} 높은 집단부터", "예측": by_pred, "실측": by_actual,
+                "순서가_완전히_같음": by_pred == by_actual}
+
+    @staticmethod
     def _readable(q: Question, error: float, width: float | None) -> dict:
         if q.scale_type == "순서형" and width:
             points = int(round(width)) + 1
@@ -266,11 +281,16 @@ class Service:
             out["문항"]["보기별_점수"] = {o: v for o, v in scored}
             out["문항"]["점수_방향"] = (f"평균이 높을수록 '{scored[-1][0]}' 쪽이고 낮을수록 '{scored[0][0]}' 쪽이다. "
                                    "높은 점수가 긍정을 뜻하지 않는 문항이 있으니 이 방향대로 말한다.")
+            out["집단_수"] = len(p["groups"])
             out["집단_평균_높낮이_상관"] = r2(s["order_corr"])
             out["집단_평균_벌어짐_예측"] = r2(s["spread_predicted"])
             out["집단_평균_벌어짐_실측"] = r2(s["spread_actual"])
+            out["집단_순서"] = self._order(p["groups"], lambda g: g["predicted_mean"], lambda g: g["actual_mean"], "평균이")
         elif kind == "이분형":
             out["문항"]["비율_기준_보기"] = q["options"][0]
+            out["집단_수"] = len(p["groups"])
+            out["집단_순서"] = self._order(p["groups"], lambda g: g["predicted"][0], lambda g: g["actual"][0],
+                                      f"'{q['options'][0]}' 비율이")
             out["집단_비율_높낮이_상관"] = r2(s["order_corr"])
             out["집단_비율_벌어짐_예측_퍼센트포인트"] = pct(s["spread_predicted"])
             out["집단_비율_벌어짐_실측_퍼센트포인트"] = pct(s["spread_actual"])
@@ -284,6 +304,8 @@ class Service:
                 row["예측_평균"] = r2(g["predicted_mean"])
                 row["실측_평균"] = r2(g["actual_mean"])
                 row["평균_차이_예측_빼기_실측"] = r2(g["predicted_mean"] - g["actual_mean"])
+                # 방향을 틀리게 말하지 않도록 문장으로도 준다 (1점이 '매우 좋다'인 문항이 있다)
+                row["평균_비교"] = self._mean_phrase(g["predicted_mean"] - g["actual_mean"], scored)
             elif kind == "이분형":
                 row[f"예측_'{q['options'][0]}'_비율_퍼센트"] = pct(g["predicted"][0])
                 row[f"실측_'{q['options'][0]}'_비율_퍼센트"] = pct(g["actual"][0])

@@ -44,9 +44,9 @@ class FakeClient:
         return FakeStream(self.turns.pop(0))
 
 
-def collect(client, service, history, panel=None):
+def collect(client, service, history, panel=None, reports=None):
     async def go():
-        return [e async for e in run_chat(client, service, history, panel)]
+        return [e async for e in run_chat(client, service, history, panel, reports)]
     return asyncio.run(go())
 
 
@@ -95,7 +95,9 @@ def test_panel_state_is_attached_to_last_user_message_only(service):
     assert sent[0] == {"role": "user", "content": "첫 질문"}
     assert sent[1] == {"role": "assistant", "content": "첫 답"}
     assert sent[2]["content"][0]["text"] == "속성을 연령으로 바꿔 줘"
-    assert "q189_W2025" in sent[2]["content"][1]["text"] and "TENURE" in sent[2]["content"][1]["text"]
+    state = sent[2]["content"][1]["text"]
+    assert "qkey=q189_W2025" in state and "attribute=TENURE" in state
+    assert "점유형태" in state and "전체 학습 어댑터" in state and "경제·사회적 위치" in state
 
 
 def test_bad_tool_input_is_returned_as_error_and_loop_continues(service):

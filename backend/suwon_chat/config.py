@@ -25,6 +25,13 @@ SOURCE_DIR = Path(os.environ.get("SUWON_SOURCE_DIR", ROOT / "수원서베이_학
 DB_PATH = Path(os.environ.get("SUWON_DB_PATH", ROOT / "data" / "suwon.db"))
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 
+# 참고 문서(보고서)와 그 색인
+REPORTS_DIR = Path(os.environ.get("SUWON_REPORTS_DIR", ROOT / "reports"))
+REPORTS_INDEX = DB_PATH.parent / "reports_index.json"
+REPORTS_VECTORS = DB_PATH.parent / "reports_vectors.npy"
+# 서버를 켤 때 임베딩 모델을 미리 올릴지. 꺼도 첫 검색 때 올라간다.
+WARM_EMBEDDER = os.environ.get("SUWON_WARM_EMBEDDER", "1") != "0"
+
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "claude-haiku-5-5")
 CHAT_EFFORT = os.environ.get("CHAT_EFFORT", "low")
 CHAT_MAX_TOKENS = int(os.environ.get("CHAT_MAX_TOKENS", "8000"))

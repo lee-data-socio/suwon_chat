@@ -30,6 +30,7 @@ CREATE TABLE predictions (adapter TEXT, qkey TEXT, attribute TEXT, grp TEXT,
     gold TEXT, base TEXT, lora TEXT, PRIMARY KEY (adapter, qkey, attribute, grp));
 CREATE TABLE lower_bound (qkey TEXT, attribute TEXT, grp TEXT, lb REAL,
     PRIMARY KEY (qkey, attribute, grp));
+CREATE TABLE steering (attribute TEXT PRIMARY KEY, question TEXT);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
@@ -81,6 +82,10 @@ def build(src: Path = config.SOURCE_DIR, db_path: Path = config.DB_PATH) -> dict
 
 def _fill(con: sqlite3.Connection, src: Path) -> dict:
     con.executescript(SCHEMA)
+
+    # 집단을 알려 주는 앞 질문 (실시간 예측에서 프롬프트를 만들 때 쓴다)
+    with open(_find(src, "steering_prompts_suwon_v2.json"), encoding="utf-8") as f:
+        con.executemany("INSERT INTO steering VALUES (?,?)", [(s["attribute"], s["qa_prompt"]) for s in json.load(f)])
 
     # 실측 분포 (3개 연도). 순서 값은 문항표가 아니라 이 파일에서 읽는다 (문항표는 명목형의 순서 값이 비어 있다).
     actual = _read_csv(src / "07_데이터/suwon-v2-full/processed/suwon-v2-full.csv")

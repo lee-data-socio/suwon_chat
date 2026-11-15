@@ -20,7 +20,11 @@ anthropic==2.8.0
 torch==2.15.0
 transformers==5.22.2
 
+# 실시간 예측 (PREDICT_BACKEND=live): Bllossom 8B에 LoRA 어댑터를 갈아 끼워 직접 추론한다
+# NVIDIA GPU가 있으면 torch를 그 PC의 CUDA에 맞는 빌드로 깐다 (https://pytorch.org 의 설치 명령).
+# GPU 메모리가 16GB보다 작으면 4비트로 올릴 수 있다: pip install bitsandbytes 한 뒤 LIVE_4BIT=1
+peft==0.21.2
+accelerate==1.15.0
+
 # 테스트
 pytest==9.2.0
-
-# 실시간 예측(3단계: peft 등)에 쓰는 패키지는 그 코드를 넣을 때 여기에 추가한다.

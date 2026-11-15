@@ -23,8 +23,21 @@ export interface Meta {
   source: Source;
   /** 집단·문항 제외 어댑터를 견줄 기준 어댑터의 id */
   reference_adapter: string;
+  /** 목록에 없는 새 문항도 예측할 수 있는가 (실시간 모드) */
+  can_predict_new?: boolean;
+  /** 실시간 모드에서 돌리고 있는 모델 */
+  live?: LiveInfo | null;
   adapters: AdapterInfo[];
   attributes: AttributeInfo[];
+}
+
+export interface LiveInfo {
+  base_model: string;
+  device: string;
+  dtype: string;
+  four_bit: boolean;
+  adapters: string[];
+  load_seconds: number;
 }
 
 export interface QuestionSummary {
@@ -94,6 +107,10 @@ export interface Summary {
 
 export interface Prediction {
   source: Source;
+  /** 실측이 없는 새 문항의 예측. 검증되지 않았다 */
+  experimental?: boolean;
+  /** 실험적 예측에 붙는 설명 */
+  note?: string;
   predict_year: number;
   adapter: { id: string; label: string; short: string; description: string };
   attribute: { id: string; label: string };
@@ -156,7 +173,9 @@ export interface Report {
 /** 답변은 글과 결과 카드가 도착한 순서대로 놓인다. */
 export type MessagePart =
   | { kind: "text"; text: string }
-  | { kind: "card"; state: PanelState; compare: CompareKey | null };
+  | { kind: "card"; state: PanelState; compare: CompareKey | null }
+  /** 목록에 없는 새 문항의 예측. 실측과 오차가 없다 */
+  | { kind: "experimental"; prediction: Prediction };
 
 export interface ChatMessage {
   id: number;

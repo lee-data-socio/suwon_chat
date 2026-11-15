@@ -4,6 +4,7 @@ import type { ChatMessage, ChatStatus, CompareKey, ContextItem, PanelState, Scen
 import type { Theme } from "../lib/color";
 import { Markdown } from "../lib/markdown";
 import { ContextCards } from "./ContextCards";
+import { ExperimentalCard } from "./ExperimentalCard";
 import { ResultCard } from "./ResultCard";
 import { Hint } from "./Tooltip";
 
@@ -17,6 +18,8 @@ interface Props {
   split: boolean;
   /** 상세 패널이 보이고 있는 장면 */
   detailKey: string | null;
+  /** 목록에 없는 새 문항도 예측할 수 있다 (실시간 모드) */
+  canPredictNew: boolean;
   onToggleTheme: () => void;
   onSend: (text: string, scenario?: Scenario) => void;
   onDetail: (state: PanelState, compare: CompareKey | null) => void;
@@ -34,6 +37,7 @@ export function Chat({
   theme,
   split,
   detailKey,
+  canPredictNew,
   onToggleTheme,
   onSend,
   onDetail,
@@ -124,6 +128,7 @@ export function Chat({
                 <br />
                 문항과 집단을 말하면 예측과 실측을 나란히 보여 드립니다.
               </p>
+              {canPredictNew && <p className="hero-new">새 문항도 물어볼 수 있습니다 (실험적)</p>}
               <div className="intro-cards">
                 {scenarios.map((s) => (
                   <button key={s.id} className="intro-card" disabled={busy} onClick={() => onSend(s.prompt, s)}>
@@ -153,6 +158,8 @@ export function Chat({
                 {m.parts.map((part, i) =>
                   part.kind === "text" ? (
                     <Markdown key={i} text={part.text} />
+                  ) : part.kind === "experimental" ? (
+                    <ExperimentalCard key={i} p={part.prediction} theme={theme} />
                   ) : (
                     <ResultCard
                       key={i}

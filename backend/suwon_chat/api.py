@@ -6,12 +6,13 @@
     GET  /api/meta         어댑터, 속성과 집단, 예측 출처, 색인 자체 점검 결과
     GET  /api/questions    2025년 문항 목록 (?q= 검색어)
     GET  /api/prediction   문항 × 속성 × 어댑터의 예측·실측·오차 (?qkey=&attribute=&adapter=)
+    POST /api/predict_new  목록에 없는 새 문항의 실험적 예측 (실시간 버전에서만)
     GET  /api/scenarios    추천 질문
     GET  /api/context      문항과 가까운 참고 문서 대목 (?qkey=)
     GET  /api/reports      참고 문서 목록,  GET /api/reports/{doc_id}  문서 한 편의 쪽별 전문
     GET  /api/chat/status  대화 LLM을 쓸 수 있는지
     POST /api/chat         대화. 응답은 SSE(text/event-stream)이고 이벤트는
-                           status {tool,text} · text {delta} · panel {state,compare,prediction} · context {qkey,query,items} · done {stop_reason} · error {code,message}
+                           status {tool,text} · text {delta} · panel {state,compare,prediction} · new_prediction {prediction} · context {qkey,query,items} · done {stop_reason} · error {code,message}
                            · saved {saved_at,model} (대화 모델 대신 저장된 답변을 내보낼 때 맨 앞에 온다)
 """
 from __future__ import annotations
@@ -33,22 +34,51 @@ from .predict import LookupBackend
 from . import saved
 from .reports import LocalEmbedder, ReportIndex
 from .scenarios import SCENARIOS
-from .service import NotFound, Service
+from .service import NEW_MAX_OPTIONS, Invalid, NotFound, Service, Unsupported
 from .store import Store
 
+# 이 앱의 안내(모델 올리기, 실시간 예측에 걸린 시간 등)가 서버 창에 보이게 한다
+_app_log = logging.getLogger("suwon_chat")
+if not _app_log.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+    _app_log.addHandler(_handler)
+    _app_log.setLevel(logging.INFO)
+    _app_log.propagate = False
 log = logging.getLogger("suwon_chat.api")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store = Store()
-    app.state.service = Service(store, LookupBackend(store))
+    if config.PREDICT_BACKEND == "live":
+        from .live import LiveBackend
+        backend = LiveBackend(store)
+        backend.load()            # 모델을 못 올리면 여기서 이유와 함께 멈춘다. 반쯤 켜진 서버를 두지 않는다
+    elif config.PREDICT_BACKEND == "lookup":
+        backend = LookupBackend(store)
+    else:
+        raise RuntimeError(f"PREDICT_BACKEND는 lookup이나 live여야 한다: {config.PREDICT_BACKEND!r}")
+    app.state.service = Service(store, backend)
+    if backend.source == "live":
+        # 추천 질문의 장면을 미리 돌려 둔다. 발표에서 처음 누를 때 기다리지 않게 한다
+        threading.Thread(target=_warm_scenarios, args=(app.state.service,), daemon=True).start()
     embedder = LocalEmbedder()
     app.state.reports = ReportIndex(config.REPORTS_INDEX, config.REPORTS_VECTORS, _guarded(embedder))
     if app.state.reports.available and config.WARM_EMBEDDER:
         # 첫 검색이 느리지 않게 임베딩 모델을 미리 올려 둔다. 서버 시작은 기다리게 하지 않는다.
         threading.Thread(target=_warm, args=(embedder,), daemon=True).start()
     yield
+
+
+def _warm_scenarios(service: Service) -> None:
+    for s in SCENARIOS:
+        if s["panel"]:
+            try:
+                service.prediction(s["panel"]["qkey"], s["panel"]["attribute"], s["panel"]["adapter"])
+            except Exception:
+                log.warning("추천 질문 %s을 미리 돌리지 못했다", s["id"], exc_info=True)
+    log.info("추천 질문의 장면을 미리 돌려 두었다")
 
 
 def _warm(embedder: LocalEmbedder) -> None:
@@ -84,7 +114,10 @@ def reports() -> ReportIndex:
 @app.get("/api/meta")
 def meta():
     r = reports()
-    return {**svc().meta(), "reports": {"available": r.available, "count": len(r.documents)}}
+    backend = svc().backend
+    return {**svc().meta(), "reports": {"available": r.available, "count": len(r.documents)},
+            "can_predict_new": svc().can_predict_new(),
+            "live": backend.describe() if hasattr(backend, "describe") else None}
 
 
 @app.get("/api/context")
@@ -118,6 +151,28 @@ def questions(q: str = ""):
 def prediction(qkey: str, attribute: str, adapter: str = "exp1"):
     try:
         return svc().prediction(qkey, attribute, adapter)
+    except NotFound as e:
+        raise HTTPException(404, str(e))
+
+
+class NewQuestion(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+    options: list[str] = Field(min_length=2, max_length=NEW_MAX_OPTIONS + 1)      # 끝에 무응답을 붙여 보내도 받는다
+    ordered: bool = True
+    off_scale_options: list[str] = Field(default_factory=list, max_length=NEW_MAX_OPTIONS)
+    attribute: str = Field(max_length=40)
+    adapter: str = Field(default="exp1", max_length=40)
+
+
+@app.post("/api/predict_new")
+def predict_new(req: NewQuestion):
+    try:
+        return svc().new_prediction(req.question, req.options, req.ordered, req.attribute, req.adapter,
+                                    req.off_scale_options)
+    except Unsupported as e:
+        raise HTTPException(409, str(e))
+    except Invalid as e:
+        raise HTTPException(422, str(e))
     except NotFound as e:
         raise HTTPException(404, str(e))
 

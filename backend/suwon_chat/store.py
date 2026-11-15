@@ -20,6 +20,7 @@ class Question:
     item: str
     text: str
     options: list[str]       # 무응답을 뗀 보기
+    all_options: list[str]   # 조사표 그대로의 보기 (끝에 무응답). 모델에 주는 프롬프트에는 이것을 쓴다
     ordinal: list[float]
     three_year: bool
     same_options: bool
@@ -37,7 +38,7 @@ class Store:
             ordinal = json.loads(r[9])
             self.questions[r[0]] = Question(
                 qkey=r[0], var=r[1], year=r[2], scale_type=r[3], survey_no=r[4], stem=r[5], item=r[6],
-                text=r[7], options=json.loads(r[8])[: len(ordinal)], ordinal=ordinal,
+                text=r[7], options=json.loads(r[8])[: len(ordinal)], all_options=json.loads(r[8]), ordinal=ordinal,
                 three_year=bool(r[10]), same_options=bool(r[11]))
         # 집단: 속성 → [집단] (자료에 적힌 순서), (연도, 속성, 집단) → 응답자 수
         self.groups: dict[str, list[str]] = {}
@@ -53,6 +54,10 @@ class Store:
                             for ad, q, a, g, gold, base, lora in con.execute(
                                 "SELECT adapter,qkey,attribute,grp,gold,base,lora FROM predictions")}
         self.lower_bound = {(q, a, g): lb for q, a, g, lb in con.execute("SELECT qkey,attribute,grp,lb FROM lower_bound")}
+        try:
+            self.steering = dict(con.execute("SELECT attribute, question FROM steering"))
+        except sqlite3.OperationalError:
+            raise RuntimeError(f"색인 DB가 옛 형식이다: {db_path}\n`python -m suwon_chat.build_index`를 다시 돌린다.") from None
         row = con.execute("SELECT value FROM meta WHERE key='self_check'").fetchone()
         self.self_check = json.loads(row[0]) if row else None
         con.close()

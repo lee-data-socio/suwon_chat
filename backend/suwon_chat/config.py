@@ -32,6 +32,19 @@ REPORTS_VECTORS = DB_PATH.parent / "reports_vectors.npy"
 # 서버를 켤 때 임베딩 모델을 미리 올릴지. 꺼도 첫 검색 때 올라간다.
 WARM_EMBEDDER = os.environ.get("SUWON_WARM_EMBEDDER", "1") != "0"
 
+# 예측을 어디서 가져올지. lookup: 정리본에 저장된 예측을 조회한다. live: 모델을 직접 돌린다 (suwon_chat/live.py)
+PREDICT_BACKEND = os.environ.get("PREDICT_BACKEND", "lookup").strip().lower()
+DEFAULT_BASE_MODEL = "MLP-KTLim/llama-3-Korean-Bllossom-8B"
+LIVE_BASE_MODEL = os.environ.get("LIVE_BASE_MODEL", DEFAULT_BASE_MODEL)   # 허깅페이스 이름이나 로컬 폴더
+# 허깅페이스에서 받을 판. 2026-11-15에 확인한 가중치이고, 2024-06-19 이후로 가중치 파일이 바뀌지 않았다
+LIVE_BASE_REVISION = os.environ.get("LIVE_BASE_REVISION", "ed9647c18477ee09a03690c613c859eddca24362")
+ADAPTER_DIR = Path(os.environ.get("SUWON_ADAPTER_DIR", ROOT / "adapters"))                    # exp1, exp2, exp3 폴더가 든 곳
+LIVE_DEVICE = os.environ.get("LIVE_DEVICE", "").strip().lower()   # cuda | mps | xpu | cpu. 비우면 알아서 고른다
+LIVE_DTYPE = os.environ.get("LIVE_DTYPE", "").strip().lower()     # bfloat16 | float16 | float32. 비우면 bfloat16
+LIVE_4BIT = os.environ.get("LIVE_4BIT", "0") == "1"               # 4비트로 줄여 올린다 (NVIDIA GPU)
+_batch = os.environ.get("LIVE_BATCH", "").strip()
+LIVE_BATCH = int(_batch) if _batch.isdigit() else 0               # 한 번에 돌릴 프롬프트 수. 0이면 GPU 8, 그 밖은 1
+
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "claude-haiku-5-5")
 CHAT_EFFORT = os.environ.get("CHAT_EFFORT", "low")
 CHAT_MAX_TOKENS = int(os.environ.get("CHAT_MAX_TOKENS", "8000"))

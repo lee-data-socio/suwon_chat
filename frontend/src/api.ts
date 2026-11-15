@@ -48,8 +48,17 @@ export function cachedPrediction(s: PanelState): Prediction | undefined {
   return cache.get(key(s));
 }
 
+/** 대화가 보낸 예측을 저장한다. 같은 장면을 기다리고 있는 카드가 있으면 바로 알려 준다 (실시간 모드에서는 모델을 두 번 기다리지 않는다). */
 export function storePrediction(s: PanelState, p: Prediction) {
   cache.set(key(s), p);
+  for (const fn of listeners) fn(key(s), p);
+}
+
+const listeners = new Set<(key: string, p: Prediction) => void>();
+
+export function onPrediction(fn: (key: string, p: Prediction) => void): () => void {
+  listeners.add(fn);
+  return () => void listeners.delete(fn);
 }
 
 export async function fetchPrediction(s: PanelState): Promise<Prediction> {
@@ -67,6 +76,7 @@ export type ChatEvent =
   | { type: "panel"; state: PanelState; compare: "actual" | CompareKey; prediction: Prediction }
   | { type: "context"; qkey: string | null; query: string; items: ContextItem[] }
   | { type: "saved"; saved_at: string; model: string }
+  | { type: "new_prediction"; prediction: Prediction }
   | { type: "done"; stop_reason: string }
   | { type: "error"; code: string; message: string };
 

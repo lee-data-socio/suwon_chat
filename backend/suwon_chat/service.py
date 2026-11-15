@@ -7,14 +7,24 @@ from statistics import mean
 from . import config
 from .metrics import display_dist, distance, is_nominal, mean_score, pearson, scale_range
 from .predict import PredictionBackend
+from .prompt import REFUSAL, with_refusal
 from .store import Question, Store
 
 
 SMALL_SAMPLE = 100   # 이 인원 이하인 집단은 실측 자체가 흔들린다 (PRD F-16)
+NEW_MAX_OPTIONS = 11  # 새 문항의 보기 수 상한. 학습한 문항은 무응답까지 12개(A~L)가 가장 많았다
 
 
 class NotFound(Exception):
     pass
+
+
+class Unsupported(Exception):
+    """지금 켜 둔 예측 방식으로는 할 수 없는 요청."""
+
+
+class Invalid(Exception):
+    """요청한 값이 잘못됐다."""
 
 
 def label_offset(q: Question) -> float:
@@ -193,6 +203,7 @@ class Service:
         }
         return {
             "source": self.backend.source,
+            "experimental": False,
             "predict_year": config.PREDICT_YEAR,
             "adapter": {"id": adapter, "label": spec["label"], "short": spec["short"],
                         "description": spec["description"]},
@@ -211,6 +222,112 @@ class Service:
             "groups": groups,
             "summary": summary,
         }
+
+    # ---- 새 문항 (실시간 예측에서만) ------------------------------------------
+    def can_predict_new(self) -> bool:
+        return hasattr(self.backend, "predict_new")
+
+    def new_prediction(self, text: str, options: list[str], ordered: bool, attribute: str, adapter: str,
+                       off_scale: list[str] | None = None) -> dict:
+        """목록에 없는 문항의 예측. 실측이 없으므로 오차도 없다. 검증되지 않은 실험적 값이다 (PRD P6).
+
+        `off_scale`은 '잘 모르겠다'처럼 척도 밖에 있는 보기다. 막대에는 나오지만 평균에서는 뺀다.
+        """
+        if not self.can_predict_new():
+            raise Unsupported("새 문항 예측은 모델을 직접 돌리는 실시간 버전에서만 된다")
+        if attribute not in self.store.groups:
+            raise NotFound(f"없는 속성: {attribute}")
+        if adapter not in config.ADAPTERS:
+            raise NotFound(f"없는 어댑터: {adapter}")
+        text = (text or "").strip()
+        shown = [o for o in with_refusal(options or []) if o != REFUSAL]
+        if not text:
+            raise Invalid("문항 문구가 비어 있다")
+        if not 2 <= len(shown) <= NEW_MAX_OPTIONS:
+            raise Invalid(f"보기는 2~{NEW_MAX_OPTIONS}개여야 한다 (지금 {len(shown)}개)")
+        if len(set(shown)) != len(shown):
+            raise Invalid("같은 보기가 두 번 들어 있다")
+        outside = {o.strip() for o in (off_scale or [])}
+        if outside - set(shown):
+            raise Invalid(f"척도 밖 보기가 보기 목록에 없다: {sorted(outside - set(shown))}")
+        n = len(shown)
+        on_scale = [o for o in shown if o not in outside]
+        kind = "이분형" if len(on_scale) == 2 and not outside else ("순서형" if ordered and len(on_scale) >= 2 else "명목형")
+        if kind == "명목형":
+            ordinal = [1.0] * n
+        else:                       # 척도 안의 보기에만 1, 2, 3… 을 매기고 척도 밖 보기는 -1
+            rank = {o: float(i + 1) for i, o in enumerate(on_scale)}
+            ordinal = [rank.get(o, -1.0) for o in shown]
+        q = Question(qkey="", var="", year=0, scale_type=kind, survey_no="", stem=text, item="", text=text,
+                     options=shown, all_options=shown + [REFUSAL], ordinal=ordinal, three_year=False,
+                     same_options=False)
+        off = label_offset(q) if kind == "순서형" else 0.0
+        rng = scale_range(ordinal)
+        preds = self.backend.predict_new(text, q.all_options, attribute, adapter)
+
+        def score(dist):
+            m = mean_score(dist, ordinal)
+            return None if m is None else m + off
+
+        groups = []
+        for g in self.store.groups[attribute]:
+            size = self.store.group_n.get((config.PREDICT_YEAR, attribute, g))
+            groups.append({
+                "group": g, "n": size, "small_sample": (size or 0) <= SMALL_SAMPLE, "held_out": False,
+                "predicted": display_dist(preds[g]["lora"], n), "zero_shot": display_dist(preds[g]["base"], n),
+                "predicted_mean": score(preds[g]["lora"]), "zero_shot_mean": score(preds[g]["base"]),
+                "actual": None, "actual_mean": None, "error": None, "zero_shot_error": None,
+                "last_year_error": None, "lower_bound": None, "history": [], "reference": None,
+            })
+        means = [g["predicted_mean"] for g in groups]
+        spec = config.ADAPTERS[adapter]
+        return {
+            "source": self.backend.source,
+            "experimental": True,
+            "note": "실측이 없는 새 문항입니다. 오차를 알 수 없는, 검증되지 않은 실험적 예측입니다.",
+            "predict_year": None,
+            "adapter": {"id": adapter, "label": spec["label"], "short": spec["short"], "description": spec["description"]},
+            "attribute": {"id": attribute, "label": config.ATTRIBUTE_LABELS[attribute]},
+            "question": {
+                "qkey": None, "text": text, "stem": text, "item": "", "survey_no": "", "scale_type": kind,
+                "options": shown, "three_year": False, "error": None, "error_metric": None, "held_out_in": [],
+                "ordinal": ordinal,
+                "option_values": [None if kind == "명목형" or o < 0 else o + off for o in ordinal],
+                "scale_min": rng[0] + off if rng else None, "scale_max": rng[1] + off if rng else None,
+                "scored": False, "held_out": False, "history_years": [],
+            },
+            "groups": groups,
+            "summary": {
+                "error_metric": None, "error": None, "error_readable": None, "zero_shot_error": None,
+                "last_year_error": None, "lower_bound": None, "reference_error": None, "order_corr": None,
+                "last_year_order_corr": None,
+                "spread_predicted": (max(means) - min(means)) if all(m is not None for m in means) else None,
+                "spread_actual": None,
+            },
+        }
+
+    def new_prediction_brief(self, p: dict) -> dict:
+        """새 문항 예측을 대화 LLM에 줄 요약."""
+        q = p["question"]
+        pct = lambda v: round(v * 100, 1)
+        out = {
+            "주의": "실측이 없는 새 문항이다. 오차를 알 수 없고 검증되지 않은 실험적 예측이다. 이 점을 답변 첫머리에 밝힌다.",
+            "문항": {"문구": q["text"], "종류": q["scale_type"], "보기": q["options"]},
+            "속성": p["attribute"]["label"], "어댑터": p["adapter"]["label"], "자료_출처": "실시간",
+        }
+        if q["scale_type"] == "순서형":
+            scored = [(o, v) for o, v in zip(q["options"], q["option_values"]) if v is not None]
+            out["문항"]["점수_방향"] = f"평균이 높을수록 '{scored[-1][0]}' 쪽이고 낮을수록 '{scored[0][0]}' 쪽이다."
+            out["집단_평균_벌어짐_예측"] = round(p["summary"]["spread_predicted"], 2)
+        rows = []
+        for g in p["groups"]:
+            row = {"집단": g["group"]}
+            if q["scale_type"] == "순서형":
+                row["예측_평균"] = round(g["predicted_mean"], 2)
+            row["예측_분포_퍼센트"] = [pct(v) for v in g["predicted"]]
+            rows.append(row)
+        out["집단별"] = rows
+        return out
 
     @staticmethod
     def _mean_phrase(diff: float, scored: list) -> str:

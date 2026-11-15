@@ -2,6 +2,7 @@ import { ArrowUpRight, Database, Radio } from "lucide-react";
 import type { CompareKey, PanelState } from "../types";
 import type { Theme } from "../lib/color";
 import { cardStats, seriesFor } from "../lib/format";
+import { isLiveMode, sourceTitle } from "../lib/labels";
 import { usePrediction } from "../lib/usePrediction";
 import { MiniChart } from "./MiniChart";
 
@@ -21,7 +22,12 @@ export function ResultCard({ state, compare, theme, compact, active, onDetail }:
   const { data: p, error } = usePrediction(state);
 
   if (error) return <div className="rc rc-error">{error}</div>;
-  if (!p) return <div className="rc rc-loading" aria-busy="true" />;
+  if (!p)
+    return (
+      <div className={`rc rc-loading${compact ? " is-compact" : ""}`} aria-busy="true">
+        {isLiveMode() ? "모델을 돌리는 중…" : "불러오는 중…"}
+      </div>
+    );
 
   const { main, versus } = cardStats(p, compare);
   const series = seriesFor(p, new Set(compare ? [compare] : []));
@@ -65,8 +71,8 @@ export function ResultCard({ state, compare, theme, compact, active, onDetail }:
             {p.adapter.label}
           </span>
           <span
-            className="rc-tag rc-source"
-            title={live ? "모델을 지금 돌려 얻은 예측이다." : "미리 계산해 저장해 둔 예측이다. 모델을 지금 돌린 값이 아니다."}
+            className={`rc-tag rc-source${live ? " is-live" : ""}`}
+            title={sourceTitle(live)}
           >
             {live ? <Radio size={12} aria-hidden /> : <Database size={12} aria-hidden />}
             {live ? "실시간" : "사전 계산"}

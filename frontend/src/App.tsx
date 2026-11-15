@@ -20,7 +20,7 @@ import type {
   Scenario,
 } from "./types";
 import { useTheme } from "./lib/hooks";
-import { REFERENCE_ID, setAdapters } from "./lib/labels";
+import { REFERENCE_ID, setAdapters, setLive } from "./lib/labels";
 import { usePrediction } from "./lib/usePrediction";
 import { Chat } from "./components/Chat";
 import { ReportModal } from "./components/ReportModal";
@@ -83,6 +83,7 @@ export default function App() {
     Promise.all([fetchMeta(), fetchQuestions(), fetchScenarios()])
       .then(([m, q, s]) => {
         setAdapters(m.adapters, m.reference_adapter);
+        setLive(m.live, m.source === "live");
         setMeta(m);
         setQuestions(q);
         setScenarios(s);
@@ -203,6 +204,14 @@ export default function App() {
               if (detailRef.current) openDetail(e.state, cmp);
               break;
             }
+            case "new_prediction":
+              // 목록에 없는 새 문항의 예측. 실측이 없으므로 평소 카드와 다른 실험적 카드로 놓는다.
+              patchMessage(answerId, (m) => ({
+                ...m,
+                parts: [...m.parts, { kind: "experimental", prediction: e.prediction }],
+                status: undefined,
+              }));
+              break;
             case "context":
               gotContext = true;
               // 한 답변에 여러 번 올 수 있다 (문항에 붙은 문서, 대화 모델이 따로 찾은 문서). 먼저 온 것을 앞에 두고 합친다.
@@ -268,6 +277,7 @@ export default function App() {
           theme={theme}
           split={detail !== null}
           detailKey={detail ? keyOf(detail.state) : null}
+          canPredictNew={meta?.can_predict_new === true}
           onToggleTheme={toggleTheme}
           onSend={send}
           onDetail={openDetail}

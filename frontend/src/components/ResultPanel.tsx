@@ -3,7 +3,7 @@ import { ChevronDown, Database, Radio, Table2, X, ZoomIn } from "lucide-react";
 import type { CompareKey, Meta, PanelState, Prediction, QuestionSummary } from "../types";
 import type { Theme } from "../lib/color";
 import { hasLastYear, seriesFor } from "../lib/format";
-import { adapterLabel, REFERENCE_ID } from "../lib/labels";
+import { adapterLabel, REFERENCE_ID, sourceTitle } from "../lib/labels";
 import { BinaryChart } from "./BinaryChart";
 import { DataTable } from "./DataTable";
 import { NominalChart } from "./NominalChart";
@@ -82,11 +82,7 @@ export function ResultPanel({ meta, questions, state, prediction: p, loading, er
         <div className="head-actions">
           <Hint
             className={`source-badge${live ? " is-live" : ""}`}
-            text={
-              live
-                ? "모델을 지금 돌려 얻은 예측이다."
-                : "미리 계산해 저장해 둔 예측이다. 모델을 지금 돌린 값이 아니다."
-            }
+            text={sourceTitle(live)}
           >
             {live ? <Radio size={14} aria-hidden /> : <Database size={14} aria-hidden />}
             {live ? "실시간" : "사전 계산"}
@@ -150,6 +146,14 @@ export function ResultPanel({ meta, questions, state, prediction: p, loading, er
 
       {/* 불러오지 못하면 늘 알린다. 이전 장면의 차트를 그대로 두면 지금 고른 것의 결과처럼 보인다 */}
       {error && <div className="panel-error">{error}</div>}
+
+      {/* 실시간 모드에서는 예측에 몇 초씩 걸린다. 기다리는 중임을 분명히 보인다 (금방 끝나면 깜빡이지 않게 조금 늦게 나타난다) */}
+      {loading && !error && (
+        <div className="panel-wait" role="status">
+          <i aria-hidden />
+          {live ? "모델을 돌리는 중…" : "불러오는 중…"}
+        </div>
+      )}
 
       {p && !error && (
         <div className={`panel-body${loading ? " is-loading" : ""}`}>

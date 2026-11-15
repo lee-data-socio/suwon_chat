@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import AsyncIterator
@@ -12,7 +13,7 @@ import logging
 
 from . import config
 from .reports import plain
-from .service import NotFound, Service
+from .service import NEW_MAX_OPTIONS, Invalid, NotFound, Service, Unsupported
 
 log = logging.getLogger("suwon_chat.chat")
 
@@ -66,7 +67,30 @@ def tools(service: Service, reports=None) -> list[dict]:
             "required": ["query"], "additionalProperties": False,
         },
     }]
-    return report_tools + [
+    new_tools = [] if not service.can_predict_new() else [{
+        "name": "predict_new_question",
+        "description": "목록에 없는 새 문항을 모델에 직접 물어 집단별 응답 분포를 예측한다. 실측이 없어 오차를 알 수 없는 "
+                       "실험적 예측이다. 사용자가 새 문항의 문구와 보기를 주었을 때만 부른다. 보기를 주지 않았으면 "
+                       "부르지 말고 보기를 되묻는다. 보기를 지어내지 않는다. '무응답'은 넣지 않는다(자동으로 붙는다).",
+        "strict": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "문항 문구. 조사표에 적을 그대로"},
+                "options": {"type": "array", "items": {"type": "string"},
+                            "description": f"보기 2~{NEW_MAX_OPTIONS}개, 조사표 순서대로"},
+                "ordered": {"type": "boolean", "description": "보기에 순서가 있으면 참(예: 전혀 아니다~매우 그렇다). 종류를 고르는 문항이면 거짓"},
+                "off_scale_options": {"type": "array", "items": {"type": "string"},
+                                      "description": "'잘 모르겠다'처럼 척도 밖에 있는 보기(options에 든 문구 그대로). 평균에서 뺀다. 없으면 빈 목록"},
+                "attribute": {"type": "string", "enum": [a["id"] for a in meta["attributes"]]},
+                "adapter": {"type": "string", "enum": [a["id"] for a in meta["adapters"]],
+                            "description": "따로 말이 없으면 exp1(전체 학습 어댑터)"},
+            },
+            "required": ["question", "options", "ordered", "off_scale_options", "attribute", "adapter"],
+            "additionalProperties": False,
+        },
+    }]
+    return report_tools + new_tools + [
         {
             "name": "search_questions",
             "description": "2025년 수원서베이 문항을 검색어로 찾는다. 문항 문구와 보기에서 검색어가 들어간 문항을 돌려준다. "
@@ -113,8 +137,17 @@ REPORTS_ON = """- **참고 문서는 예측의 근거가 아니다.** `search_re
 REPORTS_OFF = "- 연구원 보고서 같은 참고 문서 검색은 아직 연결되지 않았다. 물으면 그렇게 답한다."
 
 
+SOURCE_LOOKUP = "지금 화면의 예측은 모두 미리 계산해 저장해 둔 값이다."
+SOURCE_LIVE = "지금 화면의 예측은 질문할 때마다 이 PC에서 모델을 직접 돌려 얻는 값이다(실시간). 그래서 답이 나오기까지 몇 초 걸릴 수 있다."
+NEW_LOOKUP = """- **새 문항은 이 화면에서 예측하지 못한다.** 지금은 저장된 예측을 조회하는 버전이라 목록에 없는 문항은 답할 수 없다. 새 문항 예측은 모델을 직접 돌리는 실시간 버전에서 하며, 그 결과는 실측이 없어 검증되지 않은 실험적인 값이라고 알린다."""
+NEW_LIVE = """- **새 문항 예측은 실험적인 값이다.** 목록에 없는 문항은 `predict_new_question`으로 예측할 수 있다. 사용자가 문항 문구와 보기를 주었을 때만 부르고, 보기가 없으면 되묻는다. 결과를 말할 때는 첫머리에 "실측이 없어 맞는지 확인할 수 없는 실험적 예측"이라고 밝힌다. 오차나 정확도를 말하지 않는다. 참고로 말할 수 있는 것은 실험 결과뿐이다: 학습에서 뺀 문항 4개를 예측했을 때 평균 오차(WD)는 0.072로, 그 문항을 보고 학습했을 때의 0.050보다 컸고 문항에 따라 차이가 컸다. 새 문항의 예측에서도 집단 사이의 차이는 실제보다 작게 나올 가능성이 크므로 집단 차이를 단정하지 않는다."""
+
+
 def system_prompt(service: Service, reports=None) -> str:
     report_rules = REPORTS_ON if (reports and reports.available) else REPORTS_OFF
+    live = service.backend.source == "live"
+    source_text = SOURCE_LIVE if live else SOURCE_LOOKUP
+    new_rules = NEW_LIVE if service.can_predict_new() else NEW_LOOKUP
     meta = service.meta()
     attrs = "\n".join(f"- {a['id']} ({a['label']}): " + ", ".join(g["group"] for g in a["groups"])
                       for a in meta["attributes"])
@@ -130,7 +163,7 @@ def system_prompt(service: Service, reports=None) -> str:
     return f"""당신은 수원서베이 응답 분포 예측 실험의 시연 화면에 붙은 안내자다. 수원시 연구원의 연구자들이 화면 왼쪽 채팅으로 질문하고, 오른쪽 패널에서 차트를 본다. 한국어 존댓말로 답한다.
 
 # 이 시연이 보여 주는 것
-언어 모델(Bllossom 8B, 아래에서 "학습 전 모델")에 작은 어댑터를 붙여, 집단 하나(예: 50대)가 설문 문항 하나에 어떻게 답할지를 응답 분포로 예측한다. 어댑터는 2023·2024년 수원서베이로 학습했고, {meta['predict_year']}년 조사 결과를 보지 않은 채 {meta['predict_year']}년 문항을 예측했다. 그래서 화면은 예측과 {meta['predict_year']}년 실측을 나란히 놓고 얼마나 맞았는지 보여 준다. 지금 화면의 예측은 모두 미리 계산해 저장해 둔 값이다.
+언어 모델(Bllossom 8B, 아래에서 "학습 전 모델")에 작은 어댑터를 붙여, 집단 하나(예: 50대)가 설문 문항 하나에 어떻게 답할지를 응답 분포로 예측한다. 어댑터는 2023·2024년 수원서베이로 학습했고, {meta['predict_year']}년 조사 결과를 보지 않은 채 {meta['predict_year']}년 문항을 예측했다. 그래서 화면은 예측과 {meta['predict_year']}년 실측을 나란히 놓고 얼마나 맞았는지 보여 준다. {source_text}
 
 # 답하는 방법
 - 예측이나 실측에 관한 질문이면 `get_prediction`을 불러 숫자를 가져온 뒤 답한다. 도구를 부르면 패널이 그 차트로 바뀌므로, 답변에 표를 그리거나 분포 전체를 나열하지 않는다. 차트를 보면 알 수 있는 것을 글로 되풀이하지 말고, 차트에서 눈여겨볼 점을 3~5문장으로 짚는다.
@@ -157,7 +190,7 @@ def system_prompt(service: Service, reports=None) -> str:
 - **표본이 적은 집단은 실측도 흔들린다.** 도구 결과에서 `표본_적음`이 참인 집단(응답자 100명 이하)은 실측 분포 자체의 오차가 크다. 그 집단의 예측과 실측 차이를 말할 때 이 점을 덧붙인다.
 - **교차 집단은 예측하지 못한다.** "30대 여성"처럼 두 속성을 겹친 집단은 학습한 적이 없다. 그렇다고 답한 뒤 두 속성 가운데 하나를 `get_prediction`으로 보여 주고, 다른 하나도 따로 볼 수 있다고 알린다.
 - **연도에 따른 변화는 예측하지 못한다.** 모델에 주는 입력에는 연도 정보가 없다. "내년에 어떻게 변해?"라는 질문에는 추세를 예측하는 모델이 아니라고 답한다. 이 모델이 하는 일은 조사를 돌리기 전에 그 문항의 응답 분포를 미리 그려 보는 것이다.
-- **새 문항은 이 화면에서 예측하지 못한다.** 지금은 저장된 예측을 조회하는 버전이라 목록에 없는 문항은 답할 수 없다. 새 문항 예측은 모델을 직접 돌리는 실시간 버전에서 하며, 그 결과는 실측이 없어 검증되지 않은 실험적인 값이라고 알린다.
+{new_rules}
 - **원인을 설명하지 않는다.** 모델은 분포만 내놓고 이유는 내놓지 않는다. "왜 이렇게 예측했나"에는 모델이 이유를 말해 주지 않는다고 답한다. "실측이 왜 예측과 다른가", "왜 이 집단이 높은가"도 마찬가지다. 이 화면의 자료로는 알 수 없다. 사회적 배경이나 사건을 추측해 근거처럼 말하면 사후에 지어낸 설명이 된다.
 {report_rules}
 - 모델이 잘 못 맞힌 결과도 그대로 말한다. 오차가 크면 크다고, 작년 실측을 그대로 쓴 것보다 못하면 못하다고 말한다.
@@ -198,6 +231,15 @@ def _run_tool(service: Service, reports, name: str, args: dict) -> tuple[dict, l
             events.append(("context", {"qkey": qkey, "query": prediction["question"]["text"],
                                        "items": reports.for_question(qkey)}))
         return brief, events
+    if name == "predict_new_question":
+        prediction = service.new_prediction(str(args.get("question", "")), list(args.get("options") or []),
+                                            bool(args.get("ordered")), args.get("attribute"), args.get("adapter"),
+                                            list(args.get("off_scale_options") or []))
+        events = [("new_prediction", {"prediction": prediction})]
+        if reports and reports.available:
+            events.append(("context", {"qkey": None, "query": prediction["question"]["text"],
+                                       "items": reports.search(prediction["question"]["text"])}))
+        return service.new_prediction_brief(prediction), events
     if name == "search_reports" and reports and reports.available:
         query = str(args.get("query", ""))
         items = reports.search(query)
@@ -233,14 +275,15 @@ def _user_content(text: str, panel: dict | None, service: Service) -> list[dict]
 
 
 STATUS_TEXT = {"search_questions": "문항을 찾는 중", "get_prediction": "예측을 불러오는 중",
-               "search_reports": "참고 문서를 찾는 중"}
+               "search_reports": "참고 문서를 찾는 중", "predict_new_question": "모델에 새 문항을 묻는 중"}
 
 
 async def run_chat(client, service: Service, history: list[dict], panel: dict | None,
                    reports=None) -> AsyncIterator[tuple[str, dict]]:
     """한 질문을 처리하며 (이벤트 이름, 자료)를 내놓는다.
 
-    이벤트: status(도구 진행), text(답변 조각), panel(화면에 띄울 예측), context(참고 문서 대목), done, error.
+    이벤트: status(도구 진행), text(답변 조각), panel(화면에 띄울 예측), new_prediction(새 문항의 실험적 예측),
+    context(참고 문서 대목), done, error.
     """
     import anthropic
 
@@ -309,9 +352,10 @@ async def run_chat(client, service: Service, history: list[dict], panel: dict | 
         for block in tool_uses:
             yield "status", {"tool": block.name, "text": STATUS_TEXT.get(block.name, "확인하는 중")}
             try:
-                result, events = _run_tool(service, reports, block.name,
-                                           block.input if isinstance(block.input, dict) else {})
-            except (NotFound, KeyError) as e:
+                # 실시간 예측은 몇 초 걸린다. 그동안 서버가 다른 요청을 받을 수 있게 따로 돌린다.
+                result, events = await asyncio.to_thread(_run_tool, service, reports, block.name,
+                                                         block.input if isinstance(block.input, dict) else {})
+            except (NotFound, Unsupported, Invalid, KeyError) as e:
                 results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": True,
                                 "content": f"실패: {e}"})
                 continue

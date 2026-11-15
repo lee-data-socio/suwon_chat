@@ -1,7 +1,14 @@
 """참고 문서(보고서) 색인과 검색.
 
-문서는 `reports/*.md`에 있다. 머리말(id, title, summary, topics)과 `<!-- page N -->`로 나눈 쪽으로 되어 있고,
-쪽 하나가 검색 단위다. 임베딩 모델은 로컬에서 돈다. 문서 내용이 밖으로 나가지 않는다.
+문서는 `reports/*.md`에 있다. 머리말(id, title, summary, topics, questions)과 `<!-- page N -->`로 나눈 쪽으로
+되어 있고, 쪽 하나가 검색 단위다. 임베딩 모델은 로컬에서 돈다. 문서 내용이 밖으로 나가지 않는다.
+
+문항에 띄울 문서를 고르는 방법은 두 가지를 겹쳐 쓴다.
+  1. 문서 머리말의 `questions`에 그 문항(변수)이 적혀 있으면 그 문서를 띄운다. 쪽은 임베딩으로 가까운 것을 고른다.
+  2. 어느 문서에도 적혀 있지 않은 문항은 임베딩 유사도만으로 찾되, 문턱을 높게 둔다.
+임베딩만 쓰면 문항 문구가 일반적일 때("…에 얼마나 만족하십니까?") 무관한 문서가 0.87 넘게 나오고,
+정작 그 항목을 다룬 쪽이 0.86에 걸려 빠지는 일이 있었다 (독립 검증, 2026-11-15).
+사용자가 직접 묻는 검색(`search`)은 임베딩만 쓴다.
 
     python -m suwon_chat.reports          # reports/ → data/reports_index.json, data/reports_vectors.npy
 
@@ -26,8 +33,9 @@ TOP_K = 3
 MAX_PER_DOC = 2          # 한 문서에서 너무 많이 뽑히지 않게 한다
 # 관련 없는 문서를 억지로 띄우지 않기 위한 문턱. 이 임베딩 모델은 무관한 글끼리도 0.8 안팎이 나온다.
 # 값은 색인한 문서로 문항 113개의 검색 결과를 훑어보고 정했다 (README의 "참고 문서" 절).
-MIN_SCORE = 0.87         # 이보다 낮으면 관련 문서가 없다고 본다 (0.857~0.869 구간은 무관한 문서가 절반쯤 섞였다)
+MIN_SCORE = 0.87         # 자유 검색: 이보다 낮으면 관련 문서가 없다고 본다
 MARGIN = 0.025           # 1등과 이만큼 넘게 벌어진 대목은 버린다
+UNLISTED_MIN_SCORE = 0.91   # 어느 문서의 questions에도 없는 문항: 이 점수를 넘는 1등 문서 하나만 띄운다 (지금 문서로는 해당 없음)
 PAGE_MARK = re.compile(r"^<!--\s*page\s+(\d+)\s*-->\s*$", re.M)
 SYNTHETIC_TAG = "[시연용 가상 문서]"
 
@@ -45,6 +53,10 @@ class Document:
     summary: str
     topics: list[str]
     pages: list[dict]        # [{"page": 1, "text": "..."}]
+    questions: list[str]     # 이 문서가 다루는 문항. "q189"는 그 변수, "q132_"는 q132_로 시작하는 변수 모두
+
+    def covers(self, var: str) -> bool:
+        return any(var == q or (q.endswith("_") and var.startswith(q)) for q in self.questions)
 
     @property
     def synthetic(self) -> bool:
@@ -52,7 +64,7 @@ class Document:
 
     def to_dict(self) -> dict:
         return {"doc_id": self.doc_id, "title": self.title, "summary": self.summary, "topics": self.topics,
-                "synthetic": self.synthetic, "pages": self.pages}
+                "questions": self.questions, "synthetic": self.synthetic, "pages": self.pages}
 
 
 def parse_document(path: Path) -> Document:
@@ -69,10 +81,14 @@ def parse_document(path: Path) -> Document:
         if not head.get(key):
             raise ReportError(f"{path.name}: 머리말에 {key}가 없다")
     unquote = lambda s: s[1:-1] if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'" else s
-    try:
-        topics = json.loads(head.get("topics", "[]"))
-    except json.JSONDecodeError:
-        topics = []
+    def as_list(key: str) -> list[str]:
+        try:
+            value = json.loads(head.get(key, "[]"))
+        except json.JSONDecodeError:
+            return []
+        return [str(v) for v in value] if isinstance(value, list) else []
+
+    topics, questions = as_list("topics"), as_list("questions")
     marks = list(PAGE_MARK.finditer(body))
     if not marks:
         raise ReportError(f"{path.name}: 쪽 표시(<!-- page N -->)가 없다")
@@ -85,7 +101,7 @@ def parse_document(path: Path) -> Document:
     if not pages:
         raise ReportError(f"{path.name}: 내용이 없다")
     return Document(doc_id=unquote(head["id"]), title=unquote(head["title"]),
-                    summary=unquote(head.get("summary", "")), topics=topics, pages=pages)
+                    summary=unquote(head.get("summary", "")), topics=topics, pages=pages, questions=questions)
 
 
 def load_documents(folder: Path) -> list[Document]:
@@ -162,7 +178,15 @@ def build_index(folder: Path, questions: dict[str, str], embed: Embed,
         qvec = embed([questions[k] for k in qkeys], "query")
         scores = qvec @ vectors.T
         for row, qkey in zip(scores, qkeys):
-            by_question[qkey] = [[i, round(s, 4)] for i, s in _rank(row, chunks)]
+            var = qkey.rsplit("_W", 1)[0]
+            listed = {d.doc_id for d in docs if d.covers(var)}
+            if listed:
+                # 이 문항을 다룬다고 적힌 문서만 남기고, 그 안에서 가까운 쪽을 고른다
+                masked = np.where([c["doc_id"] in listed for c in chunks], row, -np.inf)
+                hits = [(i, s) for i, s in _rank(masked, chunks) if np.isfinite(s)]
+            else:
+                hits = _rank(row, chunks)
+            by_question[qkey] = {"listed": bool(listed), "hits": [[i, round(s, 4)] for i, s in hits]}
     index_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(vectors_path, vectors)
     index_path.write_text(json.dumps({"model": getattr(embed, "model_name", "custom"),
@@ -175,8 +199,9 @@ class ReportIndex:
     """만들어 둔 색인을 읽어 검색한다. 색인이 없으면 `available`이 거짓이고 검색 결과는 비어 있다."""
 
     def __init__(self, index_path: Path, vectors_path: Path, embed: Embed | None = None,
-                 min_score: float = MIN_SCORE, margin: float = MARGIN):
-        self.min_score, self.margin = min_score, margin
+                 min_score: float = MIN_SCORE, margin: float = MARGIN,
+                 unlisted_min_score: float = UNLISTED_MIN_SCORE):
+        self.min_score, self.margin, self.unlisted_min_score = min_score, margin, unlisted_min_score
         self.available = index_path.exists() and vectors_path.exists()
         self.embed = embed
         self.documents: dict[str, dict] = {}
@@ -205,7 +230,13 @@ class ReportIndex:
         return [self._item(i, s) for i, s in ranked if s >= self.min_score and s >= top - self.margin]
 
     def for_question(self, qkey: str) -> list[dict]:
-        return self._keep(self.by_question.get(qkey, []))
+        entry = self.by_question.get(qkey)
+        if not entry:
+            return []
+        if entry["listed"]:
+            return [self._item(i, s) for i, s in entry["hits"]]
+        top = entry["hits"][:1]
+        return [self._item(i, s) for i, s in top if s >= self.unlisted_min_score]
 
     def search(self, query: str, k: int = TOP_K) -> list[dict]:
         if not self.available or self.embed is None or not query.strip():

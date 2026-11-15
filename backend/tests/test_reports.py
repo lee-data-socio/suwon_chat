@@ -36,15 +36,31 @@ def test_duplicate_ids_are_rejected(tmp_path):
 
 
 def test_question_gets_the_closest_pages(report_index):
-    items = report_index.for_question("q51_1_W2025")          # 버스 인프라 문항
-    assert items[0]["doc_id"] == "R01" and items[0]["synthetic"] is True
+    items = report_index.for_question("q51_1_W2025")          # 버스 인프라 문항. R01이 q51_을 다룬다고 적혀 있다
+    assert [it["doc_id"] for it in items] == ["R01", "R01"] and items[0]["synthetic"] is True
     assert items[0]["title"].startswith("[시연용 가상 문서]") and items[0]["pages"] == 2
     assert items[0]["summary"] == "버스 인프라에 대한 인식을 다룬다."
-    assert report_index.for_question("q189_W2025")[0]["doc_id"] == "R02"     # 경제·사회적 위치 문항
-    assert report_index.for_question("q183_W2025")[0]["doc_id"] == "R03"     # 반려동물 문항
-    assert report_index.for_question("q183_W2025")[0]["synthetic"] is False  # 표시가 없는 제목은 실제 문서로 본다
     scores = [it["score"] for it in items]
     assert scores == sorted(scores, reverse=True)
+    # 어느 문서에도 적혀 있지 않은 문항은 임베딩으로 가장 가까운 문서 하나만
+    assert [it["doc_id"] for it in report_index.for_question("q189_W2025")] == ["R02"]     # 경제·사회적 위치
+    pet = report_index.for_question("q183_W2025")                                          # 반려동물
+    assert [it["doc_id"] for it in pet] == ["R03"] and pet[0]["synthetic"] is False        # 표시가 없는 제목은 실제 문서로 본다
+
+
+def test_listed_document_wins_over_a_closer_unlisted_one(tmp_path):
+    """문항을 다룬다고 적힌 문서가 있으면, 글이 더 닮은 다른 문서가 있어도 그 문서만 띄운다."""
+    (tmp_path / "a.md").write_text('---\nid: A\ntitle: 환경 만족도\nquestions: ["q137_"]\n---\n<!-- page 1 -->\n생활환경 이야기', encoding="utf-8")
+    (tmp_path / "b.md").write_text("---\nid: B\ntitle: 버스 인프라\n---\n<!-- page 1 -->\n버스 인프라가 잘 구축되어 있다", encoding="utf-8")
+    questions = {"q137_2_W2025": "버스 인프라가 잘 구축되어 있다", "q137_W2025": "버스 인프라", "q51_1_W2025": "버스 인프라가 잘 구축되어 있다"}
+    build_index(tmp_path, questions, fake_embed, tmp_path / "i.json", tmp_path / "v.npy")
+    idx = ReportIndex(tmp_path / "i.json", tmp_path / "v.npy", fake_embed, unlisted_min_score=0.5)
+    assert [it["doc_id"] for it in idx.for_question("q137_2_W2025")] == ["A"]     # 적힌 문서
+    assert [it["doc_id"] for it in idx.for_question("q137_W2025")] == ["B"]       # "q137_"는 q137 자체와는 다르다
+    assert [it["doc_id"] for it in idx.for_question("q51_1_W2025")] == ["B"]      # 적히지 않은 문항은 임베딩으로
+    strict = ReportIndex(tmp_path / "i.json", tmp_path / "v.npy", fake_embed, unlisted_min_score=1.01)
+    assert strict.for_question("q51_1_W2025") == []                               # 문턱 아래면 띄우지 않는다
+    assert [it["doc_id"] for it in strict.for_question("q137_2_W2025")] == ["A"]  # 적힌 문서는 문턱과 무관하다
 
 
 def test_free_text_search(report_index):
@@ -59,20 +75,19 @@ def test_at_most_two_pages_per_document(tmp_path):
         (tmp_path / f"d{i}.md").write_text(f"---\nid: D{i}\ntitle: 문서 {i}\n---\n{pages}", encoding="utf-8")
     build_index(tmp_path, {"q": "버스 인프라"}, fake_embed, tmp_path / "i.json", tmp_path / "v.npy")
     idx = ReportIndex(tmp_path / "i.json", tmp_path / "v.npy", fake_embed, min_score=0.0, margin=1.0)
-    docs = [it["doc_id"] for it in idx.for_question("q")]
+    docs = [it["doc_id"] for it in idx.search("버스 인프라")]
     assert len(docs) == 3 and max(docs.count(d) for d in set(docs)) == 2
 
 
-def test_unrelated_pages_are_not_shown(report_index):
-    """관련 문서가 없으면 아무것도 띄우지 않는다. 1등과 많이 벌어진 대목도 버린다."""
-    loose = report_index.for_question("q51_1_W2025")
-    top = loose[0]["score"]
+def test_free_search_drops_unrelated_pages(report_index):
+    """자유 검색: 1등이 문턱 아래면 아무것도 돌려주지 않고, 1등과 많이 벌어진 대목은 버린다."""
+    top = report_index.search("버스 인프라")[0]["score"]
     strict = ReportIndex.__new__(ReportIndex)
     strict.__dict__.update(report_index.__dict__)
     strict.min_score, strict.margin = top + 0.01, 1.0
-    assert strict.for_question("q51_1_W2025") == [] and strict.search("버스 인프라") == []      # 1등도 문턱 아래
+    assert strict.search("버스 인프라") == []
     strict.min_score, strict.margin = 0.0, 0.0
-    assert [it["score"] for it in strict.for_question("q51_1_W2025")] == [top]                # 1등만 남는다
+    assert [it["score"] for it in strict.search("버스 인프라")] == [top]
 
 
 def test_missing_index_means_unavailable(tmp_path):
@@ -131,6 +146,7 @@ def test_context_and_report_endpoints(service, report_index):
         assert c.get("/api/meta").json()["reports"] == {"available": True, "count": 3}
         ctx = c.get("/api/context", params={"qkey": "q189_W2025"}).json()
         assert ctx["available"] is True and ctx["items"][0]["doc_id"] == "R02" and "경제·사회적 위치" in ctx["query"]
+        assert c.get("/api/reports/R01").json()["questions"] == ["q51_"]
         assert c.get("/api/context", params={"qkey": "q189_W2024"}).status_code == 404
         assert [d["doc_id"] for d in c.get("/api/reports").json()] == ["R01", "R02", "R03"]
         doc = c.get("/api/reports/R01").json()

@@ -178,7 +178,7 @@ async def chat(req: ChatRequest):
 
     async def live():
         if not chat_status()["available"]:
-            yield "error", {"code": "no_api_key", "message": "대화 모델이 연결되지 않았습니다. 결과 카드는 그대로 볼 수 있습니다."}
+            yield "error", {"code": "no_api_key", "message": "대화 모델이 연결되지 않았습니다. 추천 질문은 저장된 답변으로 볼 수 있습니다."}
             return
         import anthropic
         # 발표 중에 오래 매달리지 않게 한다. 연결 5초, 응답 60초, 재시도 1번.
@@ -189,7 +189,7 @@ async def chat(req: ChatRequest):
         except Exception:
             # 어떤 실패든 화면이 기다리기만 하지 않도록 error 이벤트로 끝낸다
             log.exception("대화 처리 실패")
-            yield "error", {"code": "server_error", "message": "답변을 만드는 중 문제가 생겼습니다. 결과 카드는 그대로 볼 수 있습니다."}
+            yield "error", {"code": "server_error", "message": "답변을 만드는 중 문제가 생겼습니다. 다시 물어 주세요."}
         finally:
             await client.close()
 

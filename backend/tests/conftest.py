@@ -44,6 +44,7 @@ id: R01
 title: "[시연용 가상 문서] 대중교통 인프라와 버스 만족도"
 summary: "버스 인프라에 대한 인식을 다룬다."
 topics: ["버스", "교통"]
+questions: ["q51_"]
 ---
 <!-- page 1 -->
 # 대중교통 인프라와 버스 만족도
@@ -99,4 +100,5 @@ def report_index(tmp_path_factory, service) -> ReportIndex:
     questions = {q.qkey: q.text for q in service.store.target_questions}
     build_index(folder, questions, fake_embed, out / "index.json", out / "vectors.npy")
     # 가짜 임베딩은 점수 분포가 실제 모델과 달라 문턱을 끈다. 문턱은 test_reports에서 따로 본다.
-    return ReportIndex(out / "index.json", out / "vectors.npy", fake_embed, min_score=0.0, margin=1.0)
+    return ReportIndex(out / "index.json", out / "vectors.npy", fake_embed, min_score=0.0, margin=1.0,
+                       unlisted_min_score=0.0)

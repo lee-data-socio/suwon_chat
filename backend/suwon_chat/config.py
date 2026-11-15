@@ -21,7 +21,9 @@ def _load_dotenv(path: Path) -> None:
 
 _load_dotenv(ROOT / ".env")
 
-SOURCE_DIR = Path(os.environ.get("SUWON_SOURCE_DIR", ROOT / "수원서베이_학습결과_정리본"))
+# 원본 자료. 정리본 폴더가 있으면 그것을, 없으면 저장소에 든 묶음(source_data/, 필요한 파일만 고른 것)을 읽는다
+_FULL_SOURCE = ROOT / "수원서베이_학습결과_정리본"
+SOURCE_DIR = Path(os.environ.get("SUWON_SOURCE_DIR", _FULL_SOURCE if _FULL_SOURCE.exists() else ROOT / "source_data"))
 DB_PATH = Path(os.environ.get("SUWON_DB_PATH", ROOT / "data" / "suwon.db"))
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 

@@ -5,13 +5,16 @@
 
 ## 준비
 
-원본 자료 폴더 `수원서베이_학습결과_정리본/`이 이 폴더 바로 아래에 있어야 한다 (git에는 올리지 않는다).
+저장소만 받으면 된다. 앱이 읽는 원본 자료(`source_data/`, 44MB)와 어댑터(`adapters/`, 40MB)가 저장소에 들어 있다.
 
 ```bash
-conda activate llm                 # Python 3.12
+conda create -n llm python=3.12 && conda activate llm
 pip install -r requirements.txt
-cp .env.example .env               # ANTHROPIC_API_KEY를 채운다. 없어도 패널은 돈다
+cp .env.example .env               # ANTHROPIC_API_KEY를 채운다. 없으면 추천 질문만 저장된 답변으로 나온다
 ```
+
+- `source_data/`는 `수원서베이_학습결과_정리본`에서 앱과 테스트에 필요한 파일만 고른 것이다(`scripts/make_source_data.py`). 정리본 폴더 전체가 이 폴더 바로 아래에 있으면 그쪽을 읽는다.
+- 윈도우에서는 `scripts/serve.sh` 대신 아래 "실행"의 `python -m …` 명령을 쓴다.
 
 ## 실행
 
@@ -74,7 +77,7 @@ python scripts/check_answers.py 3  # 추천 질문을 3번씩 돌려 답변 속 
 ### 순서
 
 ```bash
-# 1. 저장소와 원본 자료를 준비한다 (README 맨 위의 "준비"와 같다)
+# 1. 저장소를 받고 패키지를 깐다 (README 맨 위의 "준비"와 같다)
 conda create -n llm python=3.12 && conda activate llm
 pip install -r requirements.txt          # NVIDIA GPU가 있으면 먼저 그 PC의 CUDA에 맞는 torch를 깐다 (pytorch.org)
 
@@ -132,7 +135,7 @@ python scripts/save_answers.py     # 추천 질문을 실제로 돌려 새로 �
 | `ANTHROPIC_API_KEY` | (없음) | 대화 모델 키. 없으면 채팅만 꺼지고 패널은 돈다 |
 | `CHAT_MODEL` | `claude-haiku-5-5` | 대화 모델. 값만 바꾸면 상위 모델로 돈다 |
 | `CHAT_EFFORT` | `low` | 사고 깊이 (`low` · `medium` · `high`) |
-| `SUWON_SOURCE_DIR` | `./수원서베이_학습결과_정리본` | 원본 자료 폴더 |
+| `SUWON_SOURCE_DIR` | 정리본 폴더가 있으면 그것, 없으면 `./source_data` | 원본 자료 폴더 |
 | `SUWON_DB_PATH` | `./data/suwon.db` | 색인 DB |
 | `SUWON_REPORTS_DIR` | `./reports` | 참고 문서 폴더 |
 | `PREDICT_BACKEND` | `lookup` | `lookup` 저장된 예측 조회 · `live` 모델을 직접 돌림 |
@@ -157,6 +160,7 @@ backend/suwon_chat/
   chat.py          대화 LLM (Claude API)과 도구
   api.py           앱 서버
 frontend/src/      화면 (React + TypeScript). 차트는 라이브러리 없이 직접 그렸다
+source_data/       앱이 읽는 원본 자료 (정리본에서 필요한 파일만 고른 것)
 adapters/          LoRA 어댑터 세 개 (exp1 · exp2 · exp3)
 reports/           시연용 가상 보고서 12편
 scripts/           서버 실행, 답변 확인·저장, 2023·2024년 실측 조회

@@ -39,6 +39,16 @@ EXPECTED_SCORED_CELLS = 1485
 EXPECTED_EXP1_WD = 0.0413
 
 
+class IndexFailed(Exception):
+    """색인이나 자체 점검이 실패했다."""
+
+
+def _require(ok: bool, message: str) -> None:
+    # assert는 `python -O`에서 사라지므로 쓰지 않는다
+    if not ok:
+        raise IndexFailed(message)
+
+
 def _read_csv(path: Path) -> list[dict]:
     with open(path, encoding="utf-8-sig", newline="") as f:
         return list(csv.DictReader(f))
@@ -58,6 +68,18 @@ def build(src: Path = config.SOURCE_DIR, db_path: Path = config.DB_PATH) -> dict
     tmp = db_path.with_suffix(".tmp")
     tmp.unlink(missing_ok=True)
     con = sqlite3.connect(tmp)
+    try:
+        report = _fill(con, src)
+    except BaseException:
+        con.close()
+        tmp.unlink(missing_ok=True)
+        raise
+    con.close()
+    tmp.replace(db_path)
+    return report
+
+
+def _fill(con: sqlite3.Connection, src: Path) -> dict:
     con.executescript(SCHEMA)
 
     # 실측 분포 (3개 연도). 순서 값은 문항표가 아니라 이 파일에서 읽는다 (문항표는 명목형의 순서 값이 비어 있다).
@@ -96,17 +118,20 @@ def build(src: Path = config.SOURCE_DIR, db_path: Path = config.DB_PATH) -> dict
     suffix = f"_W{config.PREDICT_YEAR}"
     pred_counts = {}
     for adapter, spec in config.ADAPTERS.items():
-        rows = json.load(open(src / spec["pred_file"], encoding="utf-8"))["rows"]
+        with open(src / spec["pred_file"], encoding="utf-8") as f:
+            rows = json.load(f)["rows"]
         held_groups = {tuple(g) for g in spec["held_out_groups"]}
         held_questions = {q[: -len(suffix)] for q in spec["held_out_questions"]}
         for r in rows:
             if r["split"] == "test":
                 continue
             # 학습에서 뺐다고 적은 집단·문항이 실제로 학습·검증 자료에 없는지 확인한다
-            assert (r["attribute"], r["group"]) not in held_groups, (adapter, r["attribute"], r["group"])
-            assert r["qkey"].rsplit("_W", 1)[0] not in held_questions, (adapter, r["qkey"])
+            _require((r["attribute"], r["group"]) not in held_groups,
+                     f"{adapter}: 뺐다고 적은 집단이 학습 자료에 있다 ({r['attribute']} {r['group']})")
+            _require(r["qkey"].rsplit("_W", 1)[0] not in held_questions,
+                     f"{adapter}: 뺐다고 적은 문항이 학습 자료에 있다 ({r['qkey']})")
         test = [r for r in rows if r["split"] == "test"]
-        assert all(r["qkey"].endswith(suffix) for r in test), f"{adapter}: 2025년이 아닌 시험 행이 있다"
+        _require(all(r["qkey"].endswith(suffix) for r in test), f"{adapter}: 2025년이 아닌 시험 행이 있다")
         con.executemany("INSERT INTO predictions VALUES (?,?,?,?,?,?,?)",
                         [(adapter, r["qkey"], r["attribute"], r["group"],
                           json.dumps(r["gold"]), json.dumps(r["base"]), json.dumps(r["lora"])) for r in test])
@@ -121,24 +146,22 @@ def build(src: Path = config.SOURCE_DIR, db_path: Path = config.DB_PATH) -> dict
     report = self_check(con, len(actual), pred_counts)
     con.execute("INSERT INTO meta VALUES ('self_check', ?)", (json.dumps(report, ensure_ascii=False),))
     con.commit()
-    con.close()
-    tmp.replace(db_path)
     return report
 
 
 def self_check(con: sqlite3.Connection, n_actual: int, pred_counts: dict) -> dict:
     """PRD A1. 하나라도 어긋나면 멈춘다. 숫자가 틀린 채로 화면이 뜨면 안 된다."""
-    assert n_actual == EXPECTED_ACTUAL_ROWS, f"실측 행 수 {n_actual}"
+    _require(n_actual == EXPECTED_ACTUAL_ROWS, f"실측 행 수 {n_actual} (기대 {EXPECTED_ACTUAL_ROWS})")
     for adapter, n in pred_counts.items():
-        assert n == EXPECTED_PRED_ROWS, f"{adapter} 예측 행 수 {n}"
+        _require(n == EXPECTED_PRED_ROWS, f"{adapter} 예측 행 수 {n} (기대 {EXPECTED_PRED_ROWS})")
     # 시험 1 채점 범위: 3개 연도에 모두 있는 순서형 문항 × 33개 집단
     rows = con.execute(
         """SELECT p.gold, p.lora, q.ordinal FROM predictions p JOIN questions q USING (qkey)
            WHERE p.adapter = 'exp1' AND q.scale_type = '순서형' AND q.three_year = 1""").fetchall()
     wds = [ordinal_emd(json.loads(g), json.loads(l), json.loads(o)) for g, l, o in rows]
-    assert len(wds) == EXPECTED_SCORED_CELLS, f"채점 칸 수 {len(wds)}"
+    _require(len(wds) == EXPECTED_SCORED_CELLS, f"채점 칸 수 {len(wds)} (기대 {EXPECTED_SCORED_CELLS})")
     wd = sum(wds) / len(wds)
-    assert round(wd, 4) == EXPECTED_EXP1_WD, f"시험 1 WD {wd:.5f} (정리본 {EXPECTED_EXP1_WD})"
+    _require(round(wd, 4) == EXPECTED_EXP1_WD, f"시험 1 WD {wd:.5f} (정리본 {EXPECTED_EXP1_WD})")
     return {"actual_rows": n_actual, "prediction_rows": pred_counts,
             "scored_cells": len(wds), "exp1_wd": round(wd, 4)}
 
@@ -146,7 +169,7 @@ def self_check(con: sqlite3.Connection, n_actual: int, pred_counts: dict) -> dic
 if __name__ == "__main__":
     try:
         result = build()
-    except (AssertionError, FileNotFoundError) as e:
+    except (IndexFailed, FileNotFoundError) as e:
         print(f"색인 실패: {e}", file=sys.stderr)
         sys.exit(1)
     print("색인 완료:", json.dumps(result, ensure_ascii=False))

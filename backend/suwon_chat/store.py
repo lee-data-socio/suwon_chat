@@ -60,9 +60,13 @@ class Store:
             (q for q in self.questions.values() if q.year == config.PREDICT_YEAR), key=lambda q: _natural(q.qkey))
 
     def previous(self, q: Question, year: int) -> Question | None:
-        """같은 문항의 이전 연도. 보기가 연도마다 같을 때만 견줄 수 있다."""
+        """같은 문항의 이전 연도. 문구·보기·순서 값이 그 해와 똑같을 때만 견줄 수 있다.
+
+        문항표의 `연도간보기동일`은 3개 연도를 한꺼번에 본 표시라, 2023년만 다른 문항의
+        2024년 비교까지 막는다. 그래서 두 해를 직접 견준다.
+        """
         p = self.questions.get(f"{q.var}_W{year}")
-        if p is None or not (q.same_options and p.same_options) or p.ordinal != q.ordinal:
+        if p is None or p.text != q.text or p.options != q.options or p.ordinal != q.ordinal:
             return None
         return p
 

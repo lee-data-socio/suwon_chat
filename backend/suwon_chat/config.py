@@ -46,15 +46,15 @@ ATTRIBUTE_LABELS = {
 # 어댑터 세 개. 학습에서 뺀 집단·문항은 정리본 build_results_v2.py의 EXP2_GROUPS, EXP3_QKEYS와 같다.
 ADAPTERS = {
     "exp1": {
-        "label": "기본 모델",
-        "short": "2023·2024년으로 학습",
+        "label": "전체 학습 어댑터",
+        "short": "2023·2024년 전체로 학습",
         "description": "2023·2024년 응답으로 학습하고 2025년을 예측한다 (시험 1).",
         "pred_file": "03_예측/시험1_미래예측/pred_bllossom-8b-b128-lr5e-5_suwon-v2-full_1003857.json",
         "held_out_groups": [],
         "held_out_questions": [],
     },
     "exp2": {
-        "label": "집단 제외 모델",
+        "label": "집단 제외 어댑터",
         "short": "7개 집단을 빼고 학습",
         "description": "속성마다 한 집단씩, 모두 7개 집단의 응답을 한 번도 보여 주지 않고 학습했다 (시험 2).",
         "pred_file": "03_예측/시험2_미관측집단/pred_bllossom-8b-b128-lr5e-5_suwon-v2-exp2_1006787.json",
@@ -66,7 +66,7 @@ ADAPTERS = {
         "held_out_questions": [],
     },
     "exp3": {
-        "label": "문항 제외 모델",
+        "label": "문항 제외 어댑터",
         "short": "4개 문항을 빼고 학습",
         "description": "문항 4개를 모든 연도에서 빼고 학습했다 (시험 3).",
         "pred_file": "03_예측/시험3_새질문/pred_bllossom-8b-b128-lr5e-5_suwon-v2-exp3_1006789.json",

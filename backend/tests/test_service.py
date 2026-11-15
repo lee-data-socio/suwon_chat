@@ -114,6 +114,51 @@ def test_nominal_question_has_no_means(service):
     assert p["summary"]["error_readable"]["unit"] == "percent"
 
 
+def test_nominal_error_matches_the_bars_on_screen(service):
+    """명목형 오차는 화면에 보이는 막대(무응답을 뗀 분포)로 계산한 값과 같아야 한다."""
+    for q in service.store.target_questions:
+        if q.scale_type != "명목형":
+            continue
+        for attr in service.store.groups:
+            for g in service.prediction(q.qkey, attr, "exp1")["groups"]:
+                for dist, err in ((g["predicted"], g["error"]), (g["zero_shot"], g["zero_shot_error"])):
+                    assert err == pytest.approx(0.5 * sum(abs(a - b) for a, b in zip(dist, g["actual"])), abs=1e-9)
+
+
+def test_last_year_is_available_when_only_2023_differs(service):
+    # q82는 2023년 보기만 다르다. 2024년과는 견줄 수 있어야 하고 2023년은 빠져야 한다.
+    p = service.prediction("q82_W2025", "SEX", "exp1")
+    assert p["question"]["history_years"] == [2024]
+    assert p["summary"]["last_year_error"] is not None
+    # q74는 순서 값은 같아도 보기 문구가 달라 견주지 않는다
+    assert service.prediction("q74_W2025", "SEX", "exp1")["question"]["history_years"] == []
+
+
+def test_brief_gives_score_direction_for_reversed_scale(service):
+    b = service.prediction_brief("q115_W2025", "SEX", "exp1")       # 1 = 매우 좋다
+    assert list(b["문항"]["보기별_점수"].items())[0] == ("매우 좋다", 1.0)
+    assert "높을수록 '매우 나쁘다'" in b["문항"]["점수_방향"]
+
+
+def test_brief_gives_shares_not_means_for_binary_question(service):
+    q = next(q for q in service.store.target_questions if q.scale_type == "이분형")
+    p = service.prediction(q.qkey, "AGE", "exp1")
+    b = service.prediction_brief(q.qkey, "AGE", "exp1")
+    first = q.options[0]
+    assert b["문항"]["비율_기준_보기"] == first
+    for row, g in zip(b["집단별"], p["groups"]):
+        assert "예측_평균" not in row
+        assert row[f"예측_'{first}'_비율_퍼센트"] == round(g["predicted"][0] * 100, 1)
+        assert row[f"실측_'{first}'_비율_퍼센트"] == round(g["actual"][0] * 100, 1)
+    assert "집단_평균_벌어짐_예측" not in b
+
+
+def test_brief_for_nominal_question_has_distributions_only(service):
+    b = service.prediction_brief("q50_W2025", "AGE", "exp1")
+    assert "예측_평균" not in b["집단별"][0] and "집단_평균_높낮이_상관" not in b
+    assert sum(b["집단별"][0]["실측_분포_퍼센트"]) == pytest.approx(100, abs=0.5)
+
+
 def test_last_year_comparison_uses_2024_actual(service):
     p = service.prediction("q132_1_W2025", "TENURE", "exp1")
     for g in p["groups"]:
@@ -163,7 +208,7 @@ def test_brief_numbers_equal_panel_numbers(service):
     p = service.prediction("q120_1_W2025", "TENURE", "exp3")
     b = service.prediction_brief("q120_1_W2025", "TENURE", "exp3")
     assert b["평균_오차"] == round(p["summary"]["error"], 4)
-    assert b["기본_모델_오차"] == round(p["summary"]["reference_error"], 4)
+    assert b["전체학습_어댑터_오차"] == round(p["summary"]["reference_error"], 4)
     assert b["문항"]["이_어댑터가_학습에서_뺀_문항"] is True
     for row, g in zip(b["집단별"], p["groups"]):
         assert row["집단"] == g["group"]

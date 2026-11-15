@@ -145,7 +145,8 @@ def test_system_prompt_lists_every_question_and_the_limits(service):
     prompt = system_prompt(service)
     for q in service.store.target_questions:
         assert q.qkey in prompt
-    for phrase in ["교차 집단", "연도에 따른 변화", "새 문항", "예측의 원인", "집단 사이의 차이를 과장하지 않는다"]:
+    for phrase in ["교차 집단", "연도에 따른 변화", "새 문항", "원인을 설명하지 않는다", "집단 사이의 차이를 과장하지 않는다",
+                   "표본이 적은 집단", "전체 학습 어댑터"]:
         assert phrase in prompt
 
 
@@ -164,3 +165,53 @@ def test_text_before_and_after_a_tool_call_is_separated_by_a_paragraph_break(ser
     events = collect(client, service, [{"role": "user", "content": "30대 여성은?"}])
     text = "".join(d["delta"] for e, d in events if e == "text")
     assert text == "교차 집단은 예측하지 못합니다.\n\n성별로 보면 이렇습니다."
+
+
+def test_history_is_cleaned_before_it_reaches_the_api():
+    from suwon_chat.chat import HISTORY_MESSAGES, MESSAGE_CHARS, normalize_history
+    history = [{"role": "assistant", "content": "안녕하세요. 무엇을 볼까요?"},     # 화면의 인사말
+               {"role": "user", "content": "첫 질문"}, {"role": "assistant", "content": "   "},
+               {"role": "assistant", "content": "답" * (MESSAGE_CHARS + 50)}, {"role": "user", "content": " 둘째 질문 "}]
+    out = normalize_history(history)
+    assert [m["role"] for m in out] == ["user", "assistant", "user"]        # 인사말과 빈 메시지는 빠진다
+    assert len(out[1]["content"]) == MESSAGE_CHARS and out[2]["content"] == "둘째 질문"
+
+    long = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"} for i in range(101)]
+    out = normalize_history(long)
+    assert len(out) <= HISTORY_MESSAGES and out[0]["role"] == "user" and out[-1]["content"] == "m100"
+
+
+def test_greeting_first_history_is_sent_starting_with_user(service):
+    client = FakeClient([{"text": ["네."]}])
+    collect(client, service, [{"role": "assistant", "content": "안녕하세요"}, {"role": "user", "content": "질문"}])
+    assert [m["role"] for m in client.calls[0]["messages"]] == ["user"]
+
+
+def test_blank_question_is_rejected_without_calling_the_api(service):
+    client = FakeClient([])
+    events = collect(client, service, [{"role": "user", "content": "   "}])
+    assert [e for e, _ in events] == ["error"] and client.calls == []
+
+
+def test_unexpected_tool_failure_does_not_break_the_stream(service, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("예상하지 못한 실패")
+    monkeypatch.setattr(service, "prediction_brief", boom)
+    args = {"qkey": "q189_W2025", "attribute": "TENURE", "adapter": "exp1"}
+    client = FakeClient([{"tools": [("get_prediction", args)], "stop": "tool_use"}, {"text": ["지금은 가져올 수 없습니다."]}])
+    events = collect(client, service, [{"role": "user", "content": "보여 줘"}])
+    assert [e for e, _ in events] == ["status", "text", "done"]
+    assert client.calls[1]["messages"][-1]["content"][0]["is_error"] is True
+
+
+def test_truncated_text_answer_says_so(service):
+    client = FakeClient([{"text": ["길게 쓰다가"], "stop": "max_tokens"}])
+    events = collect(client, service, [{"role": "user", "content": "..."}])
+    text = "".join(d["delta"] for e, d in events if e == "text")
+    assert text.startswith("길게 쓰다가") and "끊겼습니다" in text
+    assert events[-1] == ("done", {"stop_reason": "max_tokens"})
+
+
+def test_question_key_is_restricted_to_the_catalogue(service):
+    props = {t["name"]: t for t in tools(service)}["get_prediction"]["input_schema"]["properties"]
+    assert len(props["qkey"]["enum"]) == 113 and "q189_W2025" in props["qkey"]["enum"]

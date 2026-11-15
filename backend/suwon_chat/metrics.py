@@ -56,8 +56,15 @@ def tv_distance(p, q) -> float:
 
 
 def distance(p, q, ordinal) -> float:
-    """문항 종류에 맞는 거리. 순서형·이분형은 WD, 명목형은 TV."""
-    return tv_distance(p, q) if is_nominal(ordinal) else ordinal_emd(p, q, ordinal)
+    """문항 종류에 맞는 거리. 순서형·이분형은 WD, 명목형은 TV.
+
+    예측 파일의 분포는 끝에 무응답 칸이 붙어 있다. WD는 순서 값 길이만큼만 쓰므로,
+    TV도 같은 길이로 잘라 화면의 막대(무응답을 뗀 분포)와 같은 값이 나오게 한다.
+    """
+    if is_nominal(ordinal):
+        n = len(ordinal)
+        return tv_distance(p[:n], q[:n])
+    return ordinal_emd(p, q, ordinal)
 
 
 def mean_score(dist, ordinal) -> float | None:

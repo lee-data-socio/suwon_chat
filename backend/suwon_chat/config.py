@@ -43,6 +43,9 @@ ATTRIBUTE_LABELS = {
     "RELIGION": "종교",
 }
 
+# 집단·문항을 빼고 학습한 어댑터를 견줄 기준: 같은 것을 보고 학습한 어댑터
+REFERENCE_ADAPTER = "exp1"
+
 # 어댑터 세 개. 학습에서 뺀 집단·문항은 정리본 build_results_v2.py의 EXP2_GROUPS, EXP3_QKEYS와 같다.
 ADAPTERS = {
     "exp1": {

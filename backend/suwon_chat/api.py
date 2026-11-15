@@ -9,7 +9,7 @@
     GET  /api/scenarios    추천 질문
     GET  /api/chat/status  대화 LLM을 쓸 수 있는지
     POST /api/chat         대화. 응답은 SSE(text/event-stream)이고 이벤트는
-                           status {tool,text} · text {delta} · panel {state,prediction} · done {stop_reason} · error {code,message}
+                           status {tool,text} · text {delta} · panel {state,compare,prediction} · done {stop_reason} · error {code,message}
 """
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import config
@@ -137,16 +136,19 @@ async def chat(req: ChatRequest):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-# 빌드한 화면이 있으면 같은 서버에서 내보낸다 (개발 중에는 Vite 개발 서버가 /api를 이쪽으로 넘긴다)
-if (config.FRONTEND_DIST / "index.html").exists():
-    if (config.FRONTEND_DIST / "assets").is_dir():
-        app.mount("/assets", StaticFiles(directory=config.FRONTEND_DIST / "assets"), name="assets")
-
-    @app.get("/{path:path}", include_in_schema=False)
-    def spa(path: str):
-        if path == "api" or path.startswith("api/"):
-            raise HTTPException(404, "없는 주소")
-        file = config.FRONTEND_DIST / path
-        if path and file.is_file() and file.resolve().is_relative_to(config.FRONTEND_DIST.resolve()):
-            return FileResponse(file)
-        return FileResponse(config.FRONTEND_DIST / "index.html")
+# 빌드한 화면(frontend/dist)을 같은 서버에서 내보낸다. 요청마다 파일을 찾으므로 화면을 다시 빌드해도
+# 서버를 다시 켤 필요가 없다. (개발 중에는 Vite 개발 서버가 /api를 이쪽으로 넘긴다.)
+@app.get("/{path:path}", include_in_schema=False)
+def spa(path: str):
+    if path == "api" or path.startswith("api/"):
+        raise HTTPException(404, "없는 주소")
+    dist = config.FRONTEND_DIST
+    index = dist / "index.html"
+    if not index.is_file():
+        raise HTTPException(404, "화면이 아직 빌드되지 않았다. frontend 폴더에서 `npm run build`를 돌린다.")
+    file = dist / path
+    if path and file.is_file() and file.resolve().is_relative_to(dist.resolve()):
+        return FileResponse(file)
+    if path.startswith("assets/"):
+        raise HTTPException(404, "없는 파일")       # 없는 스크립트 요청에 index.html을 주면 원인을 찾기 어렵다
+    return FileResponse(index, headers={"Cache-Control": "no-cache"})

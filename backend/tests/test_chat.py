@@ -61,6 +61,7 @@ def test_prediction_goes_to_panel_and_brief_goes_to_model(service):
 
     panel = dict(events)["panel"]
     assert panel["state"] == args
+    assert panel["compare"] == "actual"
     assert panel["prediction"] == service.prediction(**args)        # 차트 자료는 서비스가 만든 그대로 간다
 
     # 두 번째 요청: 모델에는 요약이 도구 결과로 돌아가고, 사고 블록이 든 응답이 그대로 붙는다
@@ -223,3 +224,22 @@ def test_consecutive_messages_from_the_same_side_are_merged():
     out = normalize_history([{"role": "user", "content": "첫 질문"}, {"role": "assistant", "content": ""},
                              {"role": "user", "content": "둘째 질문"}])
     assert out == [{"role": "user", "content": "첫 질문\n\n둘째 질문"}]
+
+
+def _compare_for(service, args):
+    client = FakeClient([{"tools": [("get_prediction", args)], "stop": "tool_use"}, {"text": ["네."]}])
+    return dict(collect(client, service, [{"role": "user", "content": "보여 줘"}]))["panel"]["compare"]
+
+
+def test_compare_choice_is_passed_to_the_panel_when_it_makes_sense(service):
+    base = {"qkey": "q132_1_W2025", "attribute": "TENURE"}
+    assert _compare_for(service, {**base, "adapter": "exp1", "compare": "last_year"}) == "last_year"
+    assert _compare_for(service, {**base, "adapter": "exp1", "compare": "zero_shot"}) == "zero_shot"
+    assert _compare_for(service, {**base, "adapter": "exp2", "compare": "reference"}) == "reference"
+    # 전체 학습 어댑터를 자기 자신과 견줄 수는 없다
+    assert _compare_for(service, {**base, "adapter": "exp1", "compare": "reference"}) == "actual"
+    # 고르지 않으면 빼고 학습한 어댑터는 전체 학습 어댑터와 견준다
+    assert _compare_for(service, {**base, "adapter": "exp3"}) == "reference"
+    # 작년에 같은 문항이 없으면 작년 비교를 켜지 않는다
+    no_history = {"qkey": "q74_W2025", "attribute": "SEX", "adapter": "exp1", "compare": "last_year"}
+    assert _compare_for(service, no_history) == "actual"

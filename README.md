@@ -21,15 +21,20 @@ python -m suwon_chat.build_index   # 정리본 → data/suwon.db. 끝에 자체 
 python -m uvicorn suwon_chat.api:app --port 8000
 ```
 
-`scripts/serve.sh`는 이 둘을 한 번에 한다. 화면을 빌드해 두었으면(`frontend/dist`) http://localhost:8000 에서 바로 열린다.
+`scripts/serve.sh`는 이 둘을 한 번에 한다.
 
-화면을 고치면서 볼 때는 다른 터미널에서:
+화면은 한 번 빌드해 두면 같은 서버가 내보낸다. http://localhost:8000 을 연다.
 
 ```bash
 cd frontend
 npm install
-npm run dev                        # /api 요청은 8000번 서버로 넘어간다
+npm run build                      # frontend/dist 가 생긴다. 서버를 다시 켤 필요는 없다
 ```
+
+화면을 고치면서 볼 때는 `npm run dev`를 쓴다 (http://localhost:5173, `/api` 요청은 8000번 서버로 넘어간다).
+
+주소로 장면을 바로 열 수 있다. 예: `http://localhost:8000/?q=q132_1_W2025&a=TENURE&m=exp1&with=last_year`
+(`q` 문항, `a` 속성, `m` 어댑터, `with` 함께 볼 것: `last_year` · `reference` · `zero_shot`)
 
 ## 테스트
 
@@ -39,6 +44,12 @@ python -m pytest -q tests
 ```
 
 칸 단위 오차를 정리본 결과표(`01_결과표/*/칸단위.csv`)의 값과 견준다. 대화 테스트는 가짜 클라이언트를 쓰므로 API 키가 없어도 된다.
+
+실제 대화 모델의 답변은 따로 확인한다. 서버를 띄운 채로:
+
+```bash
+python scripts/check_answers.py 3  # 추천 질문을 3번씩 돌려 답변 속 숫자가 도구 결과에 있는 값인지 본다 (요금이 든다)
+```
 
 ## 설정
 
@@ -59,9 +70,10 @@ backend/suwon_chat/
   metrics.py       오차(WD·TV)와 평균. WD는 정리본의 함수를 그대로 옮겼다
   predict.py       예측 백엔드 (지금은 저장된 예측을 조회하는 것 하나)
   service.py       화면과 대화 LLM에 줄 자료. 화면의 숫자는 모두 여기서 나온다
-  scenarios.py     추천 질문
+  scenarios.json   추천 질문 (이 파일만 고치면 버튼이 바뀐다)
   chat.py          대화 LLM (Claude API)과 도구
   api.py           앱 서버
-frontend/          화면 (React)
+frontend/src/      화면 (React + TypeScript). 차트는 라이브러리 없이 직접 그렸다
+scripts/           서버 실행, 답변 확인
 docs/PRD.md        요구사항
 ```

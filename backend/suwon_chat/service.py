@@ -50,6 +50,7 @@ class Service:
         return {
             "predict_year": year,
             "source": self.backend.source,
+            "reference_adapter": config.REFERENCE_ADAPTER,
             "adapters": [
                 {"id": k, "label": v["label"], "short": v["short"], "description": v["description"],
                  "held_out_groups": [{"attribute": a, "attribute_label": config.ATTRIBUTE_LABELS[a], "group": g}
@@ -70,7 +71,7 @@ class Service:
             errs = []
             for attr, groups in self.store.groups.items():
                 for g in groups:
-                    row = self.store.predictions[("exp1", q.qkey, attr, g)]
+                    row = self.store.predictions[(config.REFERENCE_ADAPTER, q.qkey, attr, g)]
                     errs.append(distance(row["gold"], row["lora"], q.ordinal))
             out[q.qkey] = mean(errs)
         return out
@@ -122,11 +123,12 @@ class Service:
         held_groups = {g for a, g in spec["held_out_groups"] if a == attribute}
         prev_q = {y: self.store.previous(q, y) for y in (2023, 2024)}
         preds = self.backend.predict(qkey, attribute, adapter)
-        reference = self.backend.predict(qkey, attribute, "exp1") if adapter != "exp1" else None
+        ref_id = config.REFERENCE_ADAPTER
+        reference = self.backend.predict(qkey, attribute, ref_id) if adapter != ref_id else None
 
         groups = []
         for g in self.store.groups[attribute]:
-            gold = self.store.predictions[("exp1", qkey, attribute, g)]["gold"]
+            gold = self.store.predictions[(ref_id, qkey, attribute, g)]["gold"]   # 2025년 실측은 어느 파일이나 같다
             lora, base = preds[g]["lora"], preds[g]["base"]
             history = []
             for y, pq in prev_q.items():
@@ -155,7 +157,8 @@ class Service:
             }
             if reference is not None:
                 ref = reference[g]["lora"]
-                row["reference"] = {"adapter": "exp1", "predicted": display_dist(ref, n),
+                row["reference"] = {"adapter": ref_id, "label": config.ADAPTERS[ref_id]["label"],
+                                    "predicted": display_dist(ref, n),
                                     "predicted_mean": score(ref),
                                     "error": distance(gold, ref, q.ordinal)}
             groups.append(row)

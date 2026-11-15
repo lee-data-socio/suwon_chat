@@ -15,6 +15,7 @@ from .service import NotFound, Service
 
 log = logging.getLogger("suwon_chat.chat")
 
+COMPARE = ("actual", "last_year", "reference", "zero_shot")   # 패널에 함께 띄울 비교 대상
 MAX_TURNS = 6            # 한 질문에서 도구를 부르고 다시 답하는 횟수의 상한
 HISTORY_MESSAGES = 24    # 모델에 넘기는 이전 대화의 최대 개수. 넘으면 오래된 것부터 버린다
 MESSAGE_CHARS = 8000     # 메시지 하나의 최대 길이. 넘으면 뒤를 자른다
@@ -79,8 +80,14 @@ def tools(service: Service) -> list[dict]:
                                   "description": "집단을 나누는 속성 하나"},
                     "adapter": {"type": "string", "enum": [a["id"] for a in meta["adapters"]],
                                 "description": "exp1 전체 학습 어댑터, exp2 집단 제외 어댑터, exp3 문항 제외 어댑터"},
+                    "compare": {"type": "string", "enum": list(COMPARE),
+                                "description": "예측과 2025년 실측 옆에 함께 띄울 비교 대상. "
+                                               "actual: 없음(예측과 실측만). last_year: 2024년 실측(작년 값과 견줄 때). "
+                                               "reference: 전체 학습 어댑터의 예측(exp2·exp3에서 뺀 집단·문항을 볼 때). "
+                                               "zero_shot: 학습 전 모델의 예측. "
+                                               "사용자가 따로 말하지 않으면 exp1은 actual, exp2·exp3은 reference를 쓴다."},
                 },
-                "required": ["qkey", "attribute", "adapter"], "additionalProperties": False,
+                "required": ["qkey", "attribute", "adapter", "compare"], "additionalProperties": False,
             },
         },
     ]
@@ -155,9 +162,22 @@ def _run_tool(service: Service, name: str, args: dict) -> tuple[dict, dict | Non
     if name == "get_prediction":
         qkey, attribute, adapter = args.get("qkey"), args.get("attribute"), args.get("adapter")
         brief = service.prediction_brief(qkey, attribute, adapter)
+        prediction = service.prediction(qkey, attribute, adapter)
         state = {"qkey": qkey, "attribute": attribute, "adapter": adapter}
-        return brief, {"state": state, "prediction": service.prediction(qkey, attribute, adapter)}
+        return brief, {"state": state, "compare": _compare(args.get("compare"), prediction), "prediction": prediction}
     raise NotFound(f"없는 도구: {name}")
+
+
+def _compare(asked, prediction: dict) -> str:
+    """모델이 고른 비교 대상이 이 화면에서 뜻이 있을 때만 쓴다. 아니면 어댑터에 맞는 기본값."""
+    is_reference = prediction["adapter"]["id"] == config.REFERENCE_ADAPTER
+    if asked == "reference" and is_reference:
+        asked = None                       # 전체 학습 어댑터를 자기 자신과 견줄 수는 없다
+    if asked == "last_year" and prediction["summary"]["last_year_error"] is None:
+        asked = None                       # 작년에 같은 문항이 없다
+    if asked in COMPARE:
+        return asked
+    return "actual" if is_reference else "reference"
 
 
 def _user_content(text: str, panel: dict | None, service: Service) -> list[dict]:

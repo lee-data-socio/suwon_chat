@@ -88,3 +88,25 @@ def test_server_failure_ends_the_stream_with_an_error_event(client, monkeypatch)
 
 def test_blank_last_message_is_rejected(client):
     assert client.post("/api/chat", json={"messages": [{"role": "user", "content": "  "}]}).status_code == 400
+
+
+def test_frontend_is_served_from_dist_without_restart(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(api.config, "FRONTEND_DIST", tmp_path)
+    assert client.get("/").status_code == 404                       # 아직 빌드하지 않았다
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<html>화면</html>", encoding="utf-8")
+    (tmp_path / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
+    assert "화면" in client.get("/").text                            # 빌드한 뒤에는 서버를 다시 켜지 않아도 나온다
+    assert "화면" in client.get("/some/page").text
+    assert client.get("/assets/app.js").text == "console.log(1)"
+    assert client.get("/assets/old-hash.js").status_code == 404
+    assert client.get("/api/nope").status_code == 404
+    assert client.get("/%2e%2e/%2e%2e/etc/passwd").status_code in (200, 404)
+    assert "root:" not in client.get("/%2e%2e/%2e%2e/etc/passwd").text
+
+
+def test_meta_names_the_reference_adapter(client):
+    meta = client.get("/api/meta").json()
+    assert meta["reference_adapter"] == "exp1"
+    p = client.get("/api/prediction", params={"qkey": "q189_W2025", "attribute": "AGE", "adapter": "exp2"}).json()
+    assert p["groups"][0]["reference"]["label"] == "전체 학습 어댑터"

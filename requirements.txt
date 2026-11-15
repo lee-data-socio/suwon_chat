@@ -1,0 +1,21 @@
+# 수원서베이 시연 챗봇 — 파이썬 패키지 (Python 3.12, 미니콘다 llm 환경 기준 버전)
+#   conda create -n llm python=3.12 && conda activate llm
+#   pip install -r requirements.txt
+# 패키지를 새로 쓰면 이 파일도 함께 고친다.
+
+# 앱 서버
+fastapi==0.162.4
+uvicorn==0.54.0
+pydantic==2.14.3
+
+# 자료 색인과 오차 계산
+numpy==2.5.4
+
+# 대화 LLM (Claude API)
+anthropic==2.8.0
+
+# 테스트
+pytest==9.2.0
+
+# 실시간 예측(3단계: torch, transformers, peft)과 보고서 색인(2단계)에 쓰는 패키지는
+# 그 단계의 코드를 넣을 때 여기에 추가한다. torch는 PC의 GPU에 맞는 빌드로 따로 깐다.

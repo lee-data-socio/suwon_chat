@@ -1,0 +1,16 @@
+# 원본 자료 (용량이 크고 고치지 않는다)
+/수원서베이_학습결과_정리본/
+/학습결과_정리본.zip
+
+# 만들어지는 파일
+/data/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+/frontend/dist/
+
+# 비밀 값과 도구 상태
+.env
+.omc/
+.vscode/

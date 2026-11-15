@@ -74,7 +74,7 @@ class KeyFilter:
 def chat_status() -> dict:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return {"available": False, "model": config.CHAT_MODEL,
-                "reason": "ANTHROPIC_API_KEY가 설정되지 않았다. 패널은 대화 없이도 쓸 수 있다."}
+                "reason": "ANTHROPIC_API_KEY가 설정되지 않았다. 추천 질문은 저장된 답변으로 볼 수 있다."}
     return {"available": True, "model": config.CHAT_MODEL, "reason": None}
 
 

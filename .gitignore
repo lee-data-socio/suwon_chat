@@ -8,7 +8,6 @@
 /models/
 
 # 만들어지는 파일
-/data/
 __pycache__/
 *.pyc
 .pytest_cache/

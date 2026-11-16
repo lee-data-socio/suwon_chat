@@ -2,7 +2,7 @@
 
     python -m suwon_chat.build_index
 
-끝에 자체 점검을 돈다 (PRD A1): 행 수, 그리고 시험 1 전체 WD가 정리본의 값과 같은지.
+끝에 자체 점검을 돈다: 행 수, 그리고 시험 1 전체 WD가 정리본의 값과 같은지.
 """
 from __future__ import annotations
 
@@ -155,7 +155,7 @@ def _fill(con: sqlite3.Connection, src: Path) -> dict:
 
 
 def self_check(con: sqlite3.Connection, n_actual: int, pred_counts: dict) -> dict:
-    """PRD A1. 하나라도 어긋나면 멈춘다. 숫자가 틀린 채로 화면이 뜨면 안 된다."""
+    """하나라도 어긋나면 멈춘다. 숫자가 틀린 채로 화면이 뜨면 안 된다."""
     _require(n_actual == EXPECTED_ACTUAL_ROWS, f"실측 행 수 {n_actual} (기대 {EXPECTED_ACTUAL_ROWS})")
     for adapter, n in pred_counts.items():
         _require(n == EXPECTED_PRED_ROWS, f"{adapter} 예측 행 수 {n} (기대 {EXPECTED_PRED_ROWS})")

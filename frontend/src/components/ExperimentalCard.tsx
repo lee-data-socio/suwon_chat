@@ -6,7 +6,7 @@ import { sourceLabel, sourceTitle } from "../lib/labels";
 import { MiniChart } from "./MiniChart";
 
 /**
- * 목록에 없는 새 문항의 예측 카드. 실측이 없어 오차를 알 수 없다 (PRD P6).
+ * 목록에 없는 새 문항의 예측 카드. 실측이 없어 오차를 알 수 없다.
  * 평소 결과 카드와 달리 점선 테두리와 '실험적' 표시를 쓰고, 예측 막대만 한 줄씩 그린다.
  * 상세 패널은 목록에 있는 문항만 다루므로 '자세히 보기'는 없다.
  */

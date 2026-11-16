@@ -204,7 +204,7 @@ def test_scenarios_point_at_real_cells(service):
 
 
 def test_brief_numbers_equal_panel_numbers(service):
-    """대화 LLM에 주는 요약과 화면에 가는 자료가 같은 숫자여야 한다 (PRD A3)."""
+    """대화 LLM에 주는 요약과 화면에 가는 자료가 같은 숫자여야 한다."""
     p = service.prediction("q120_1_W2025", "TENURE", "exp3")
     b = service.prediction_brief("q120_1_W2025", "TENURE", "exp3")
     assert b["평균_오차"] == round(p["summary"]["error"], 4)

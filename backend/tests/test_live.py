@@ -1,5 +1,5 @@
 """실시간 백엔드의 배선을 아주 작은 무작위 모델로 확인한다. 실제 Bllossom으로 저장된 예측과 같은 값이
-나오는지는 GPU가 있는 PC에서 `python -m suwon_chat.live_check`로 본다 (PRD A6)."""
+나오는지는 GPU가 있는 PC에서 `python -m suwon_chat.live_check`로 본다."""
 import pytest
 import torch
 

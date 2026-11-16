@@ -12,7 +12,7 @@
 
     python -m suwon_chat.reports          # reports/ → data/reports_index.json, data/reports_vectors.npy
 
-참고 문서는 예측에 쓰이지 않는다. 화면에서도 예측·실측과 따로 보인다 (PRD P1).
+참고 문서는 예측에 쓰이지 않는다. 화면에서도 예측·실측과 따로 보인다.
 """
 from __future__ import annotations
 

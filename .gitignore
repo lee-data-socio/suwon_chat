@@ -19,3 +19,6 @@ node_modules/
 .env
 .omc/
 .vscode/
+
+# 내부용 기획 문서 (공개하지 않는다)
+/docs/PRD.md

@@ -1,6 +1,6 @@
 """대화 LLM (Claude API). 문항을 찾고 예측을 불러와 문장으로 설명한다.
 
-숫자는 도구 결과에서만 나온다. 차트 자료는 대화 LLM을 거치지 않고 `panel` 이벤트로 화면에 직접 간다 (PRD P2).
+숫자는 도구 결과에서만 나온다. 차트 자료는 대화 LLM을 거치지 않고 `panel` 이벤트로 화면에 직접 간다.
 """
 from __future__ import annotations
 

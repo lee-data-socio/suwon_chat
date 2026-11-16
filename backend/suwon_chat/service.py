@@ -1,4 +1,4 @@
-"""화면과 대화 LLM에 줄 자료를 만든다. 화면에 나오는 모든 숫자는 여기서 계산한다 (PRD P2)."""
+"""화면과 대화 LLM에 줄 자료를 만든다. 화면에 나오는 모든 숫자는 여기서 계산한다."""
 from __future__ import annotations
 
 import re
@@ -11,7 +11,7 @@ from .prompt import REFUSAL, with_refusal
 from .store import Question, Store
 
 
-SMALL_SAMPLE = 100   # 이 인원 이하인 집단은 실측 자체가 흔들린다 (PRD F-16)
+SMALL_SAMPLE = 100   # 이 인원 이하인 집단은 실측 자체가 흔들린다
 NEW_MAX_OPTIONS = 11  # 새 문항의 보기 수 상한. 학습한 문항은 무응답까지 12개(A~L)가 가장 많았다
 
 
@@ -229,7 +229,7 @@ class Service:
 
     def new_prediction(self, text: str, options: list[str], ordered: bool, attribute: str, adapter: str,
                        off_scale: list[str] | None = None) -> dict:
-        """목록에 없는 문항의 예측. 실측이 없으므로 오차도 없다. 검증되지 않은 실험적 값이다 (PRD P6).
+        """목록에 없는 문항의 예측. 실측이 없으므로 오차도 없다. 검증되지 않은 실험적 값이다.
 
         `off_scale`은 '잘 모르겠다'처럼 척도 밖에 있는 보기다. 막대에는 나오지만 평균에서는 뺀다.
         """

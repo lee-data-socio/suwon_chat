@@ -4,7 +4,7 @@
 ("Answer:A"와 "Answer: A" 두 표기)의 확률을 더해 보기 수만큼 정규화한다.
 
     PREDICT_BACKEND=live python -m uvicorn suwon_chat.api:app --port 8000
-    python -m suwon_chat.live_check          # 저장된 예측과 같은 값이 나오는지 확인 (PRD A6)
+    python -m suwon_chat.live_check          # 저장된 예측과 같은 값이 나오는지 확인
 
 필요한 것: 모델 가중치 약 16GB(처음 한 번 내려받는다)와 그만큼의 GPU 메모리 또는 RAM.
 `LIVE_4BIT=1`이면 4비트로 줄여 올린다(NVIDIA GPU, bitsandbytes 필요). 이때는 저장된 예측과 값이 조금 달라진다.

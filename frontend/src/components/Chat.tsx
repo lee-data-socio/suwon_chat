@@ -158,7 +158,7 @@ export function Chat({
           <span className="brand-mark" aria-hidden>
             <BarChart3 size={15} />
           </span>
-          <span className="brand-name">수원서베이 응답 예측</span>
+          <span className="brand-name">수원서베이 특화 LLM</span>
         </div>
         <button className="icon-btn" onClick={onToggleTheme} aria-label={theme === "light" ? "어두운 화면으로" : "밝은 화면으로"}>
           {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
@@ -176,7 +176,7 @@ export function Chat({
         <div className={`chat-col${empty ? " is-empty" : ""}${duo ? " is-duo" : ""}`}>
           {empty && (
             <div className="hero">
-              <h1>수원서베이 응답 예측</h1>
+              <h1>수원서베이 특화 LLM</h1>
               <p>
                 2023·2024년 수원서베이로 학습한 로컬 AI가 아직 하지 않은 조사의 응답을 미리 가늠합니다.
                 <br />

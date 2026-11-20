@@ -39,6 +39,8 @@ export interface SeriesDef {
   tag: string;
   /** 범례·표에 쓰는 이름 */
   name: string;
+  /** 가는 막대로 그린다. 비우면 예측·실측만 굵게 */
+  minor?: boolean;
 }
 
 export function seriesFor(p: Prediction, compare: Set<CompareKey>): SeriesDef[] {
@@ -46,12 +48,25 @@ export function seriesFor(p: Prediction, compare: Set<CompareKey>): SeriesDef[] 
   const isBase = p.adapter.id === REFERENCE_ID;
   const out: SeriesDef[] = [
     { key: "predicted", tag: "예측", name: `${p.adapter.label}의 예측` },
-    { key: "actual", tag: "실측", name: `${year}년 실측` },
+    { key: "actual", tag: "검증", name: `${year}년 결과(검증용)` },
   ];
   if (compare.has("reference") && !isBase) out.push({ key: "reference", tag: adapterShort(REFERENCE_ID), name: `${adapterLabel(REFERENCE_ID)}의 예측` });
   if (compare.has("last_year") && hasLastYear(p))
-    out.push({ key: "last_year", tag: "작년", name: `${year - 1}년 실측` });
+    out.push({ key: "last_year", tag: "작년", name: `${year - 1}년 조사` });
   if (compare.has("zero_shot")) out.push({ key: "zero_shot", tag: "학습 전", name: "학습 전 모델의 예측" });
+  return out;
+}
+
+/**
+ * 답변 속 카드의 기본 계열: 예측과 지난 조사. 이 시연은 2025년 조사를 아직 하지 않았다고 놓으므로
+ * 2025년 결과는 '검증 보기'를 눌렀을 때만 보인다. 빼고 학습한 AI면 보고 학습한 AI의 예측도 함께 둔다.
+ */
+export function previewSeries(p: Prediction, compare: CompareKey | null): SeriesDef[] {
+  const year = p.predict_year;
+  const out: SeriesDef[] = [{ key: "predicted", tag: "예측", name: `${year}년 예측` }];
+  if (hasLastYear(p)) out.push({ key: "last_year", tag: `${year - 1}`, name: `${year - 1}년 조사`, minor: false });
+  if (compare === "reference" && p.adapter.id !== REFERENCE_ID)
+    out.push({ key: "reference", tag: adapterShort(REFERENCE_ID), name: `${adapterLabel(REFERENCE_ID)}의 예측` });
   return out;
 }
 
@@ -145,6 +160,30 @@ export function cardStats(p: Prediction, compare: CompareKey | null): { main: St
     else versus = { label: `${adapterLabel(REFERENCE_ID)}는`, value: readable(p, s.reference_error)! };
   }
   return { main, versus };
+}
+
+/** 집단들의 값 범위를 한 줄로: 순서형은 평균, 이분형은 첫 보기 비율. 명목형은 한 줄로 줄이지 않는다 */
+function spread(p: Prediction, key: SeriesKey): string | null {
+  const kind = p.question.scale_type;
+  const vals = p.groups
+    .map((g) => (kind === "순서형" ? meanOf(p, g, key) : kind === "이분형" ? (distOf(p, g, key)?.[0] ?? null) : null))
+    .filter((v): v is number => v != null);
+  if (!vals.length || vals.length !== p.groups.length) return null;
+  const lo = Math.min(...vals);
+  const hi = Math.max(...vals);
+  if (kind === "순서형") return lo === hi ? `평균 ${num(lo)}점` : `평균 ${num(lo)}~${num(hi)}점`;
+  return `‘${p.question.options[0]}’ ${pct(lo, 1)}~${pct(hi, 1)}`;
+}
+
+/** 검증 전 카드의 한 줄 요약: 예측과 지난 조사의 집단 범위. 2025년 결과와 오차는 쓰지 않는다. */
+export function previewStats(p: Prediction): { main: Stat | null; versus: Stat | null } {
+  const year = p.predict_year;
+  const pred = spread(p, "predicted");
+  const last = hasLastYear(p) ? spread(p, "last_year") : null;
+  return {
+    main: pred ? { label: `${year}년 예측 · 집단별`, value: pred } : null,
+    versus: last ? { label: `${year - 1}년 조사 · 집단별`, value: last } : null,
+  };
 }
 
 /** 가상 문서의 제목 앞에 붙은 '[시연용 가상 문서]'는 표시(배지)로 따로 보이므로 뗀다. */

@@ -162,7 +162,7 @@ export function ResultPanel({ meta, questions, state, prediction: p, loading, er
           <section className="card chart-card">
             <div className="card-head">
               <h2>
-                예측과 {p.predict_year}년 실측
+                검증: 예측과 {p.predict_year}년 결과
                 <span className="card-sub">
                   {p.attribute.label} {p.groups.length}개 집단 · {p.adapter.label} ({p.adapter.short})
                 </span>
@@ -175,7 +175,7 @@ export function ResultPanel({ meta, questions, state, prediction: p, loading, er
                   title={hasLastYear(p) ? undefined : "작년 조사와 보기가 달라 견줄 수 없다"}
                   onClick={() => onCompare("last_year")}
                 >
-                  <SeriesMark series="last_year" size={9} /> 작년({p.predict_year - 1}) 실측
+                  <SeriesMark series="last_year" size={9} /> 작년({p.predict_year - 1}) 조사
                 </button>
                 {p.adapter.id !== REFERENCE_ID && (
                   <button className={`chip${compare.has("reference") ? " is-on" : ""}`} onClick={() => onCompare("reference")}>

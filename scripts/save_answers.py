@@ -2,23 +2,25 @@
 
     python scripts/save_answers.py [시나리오 id …]     # id를 주면 그것만 새로 받는다
 
-앱 서버가 8000번에서 돌고 API 키가 설정돼 있어야 한다. 결과는 backend/suwon_chat/saved_answers.json에 쓴다.
+앱 서버가 돌고 API 키가 설정돼 있어야 한다. 주소는 SUWON_URL (기본 http://localhost:8000). 결과는 backend/suwon_chat/saved_answers.json에 쓴다.
 저장한 뒤에는 사람이 읽고 고친다. 대화 모델을 쓸 수 없을 때 이 글이 그대로 화면에 나간다.
 """
 import datetime
 import json
+import os
 import sys
 import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+BASE = os.environ.get("SUWON_URL", "http://localhost:8000").rstrip("/")
 OUT = ROOT / "backend" / "suwon_chat" / "saved_answers.json"
 SCENARIOS = json.loads((ROOT / "backend" / "suwon_chat" / "scenarios.json").read_text(encoding="utf-8"))
 
 
 def ask(prompt: str) -> dict:
     body = json.dumps({"messages": [{"role": "user", "content": prompt}], "panel": None}).encode()
-    req = urllib.request.Request("http://localhost:8000/api/chat", body, {"content-type": "application/json"})
+    req = urllib.request.Request(f"{BASE}/api/chat", body, {"content-type": "application/json"})
     text, panel, event = "", None, None
     with urllib.request.urlopen(req, timeout=180) as r:
         for raw in r:
@@ -41,7 +43,7 @@ def ask(prompt: str) -> dict:
 def main() -> None:
     only = set(sys.argv[1:])
     saved = json.loads(OUT.read_text(encoding="utf-8")) if OUT.exists() else {}
-    status = json.load(urllib.request.urlopen("http://localhost:8000/api/chat/status"))
+    status = json.load(urllib.request.urlopen(f"{BASE}/api/chat/status"))
     for s in SCENARIOS:
         if only and s["id"] not in only:
             continue

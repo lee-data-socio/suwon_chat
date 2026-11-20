@@ -117,7 +117,7 @@ export function MiniChart({ p, series, theme }: Props) {
             <div className="mc-lines">
               {series.map((s, si) => {
                 const d = distOf(p, g, s.key);
-                const minor = !isMain(s.key);
+                const minor = s.minor ?? !isMain(s.key);
                 return (
                   <div className={`mc-line${minor ? " is-minor" : ""}`} key={s.key}>
                     <span className="mc-tag">{s.tag}</span>

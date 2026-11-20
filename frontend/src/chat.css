@@ -552,7 +552,27 @@
 .rc-foot {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 12px;
+}
+
+.rc-verify.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.rc-verify-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 7px 11px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 
 .rc-open {

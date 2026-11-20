@@ -115,9 +115,12 @@ export function Chat({
   };
 
   const empty = count === 0;
+  // 비교 답변이 하나라도 있거나 비교를 켜 두었으면 열을 넓힌다. 설정을 꺼도 지난 비교 답변은 두 칸 그대로 보인다
+  const duo = compareWith !== "off" || messages.some((m) => m.compareAnswer);
 
   /** 답변 본문: 글, 결과 카드, 진행 표시, 안내 */
-  const body = (a: { parts: MessagePart[]; status?: string; pending?: boolean; notice?: string }) => (
+  /** compact: 차트 없이 한 줄로 줄인 카드. 비교 답변의 두 칸은 좁아서 늘 줄인다 */
+  const body = (a: { parts: MessagePart[]; status?: string; pending?: boolean; notice?: string }, compact: boolean) => (
     <>
       {a.parts.map((part, i) =>
         part.kind === "text" ? (
@@ -130,7 +133,7 @@ export function Chat({
             state={part.state}
             compare={part.compare}
             theme={theme}
-            compact={split || compareWith !== "off"}
+            compact={compact}
             active={detailKey === keyOf(part.state)}
             onDetail={onDetail}
           />
@@ -170,7 +173,7 @@ export function Chat({
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
       >
-        <div className={`chat-col${empty ? " is-empty" : ""}${compareWith !== "off" ? " is-duo" : ""}`}>
+        <div className={`chat-col${empty ? " is-empty" : ""}${duo ? " is-duo" : ""}`}>
           {empty && (
             <div className="hero">
               <h1>수원서베이 응답 예측</h1>
@@ -216,15 +219,15 @@ export function Chat({
                   <div className="duo">
                     <div className="duo-col is-side">
                       <DuoLabel grounding={m.compareAnswer.grounding} />
-                      {body(m.compareAnswer)}
+                      {body(m.compareAnswer, true)}
                     </div>
                     <div className="duo-col is-main">
                       <DuoLabel grounding="full" />
-                      {body(m)}
+                      {body(m, true)}
                     </div>
                   </div>
                 ) : (
-                  body(m)
+                  body(m, split)
                 )}
                 {m.context && m.context.length > 0 && !m.pending && <ContextCards items={m.context} onOpen={onOpenReport} />}
               </div>

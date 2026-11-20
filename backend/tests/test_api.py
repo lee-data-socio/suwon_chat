@@ -118,7 +118,7 @@ def test_meta_names_the_reference_adapter(client):
 # ---- 저장된 답변 ----------------------------------------------------------------
 SAVED = {"S1": {"text": "저장해 둔 답변입니다. 자가 집단의 예측이 실측과 가깝습니다.", "saved_at": "2026-11-15", "model": "claude-haiku-5-5",
                 "panel": {"qkey": "q189_W2025", "attribute": "TENURE", "adapter": "exp1", "compare": "actual"}},
-         "S5": {"text": "교차 집단은 예측하지 못합니다.", "saved_at": "2026-11-15", "model": "claude-haiku-5-5", "panel": None}}
+         "S6": {"text": "교차 집단은 예측하지 못합니다.", "saved_at": "2026-11-15", "model": "claude-haiku-5-5", "panel": None}}
 
 
 def _events(text):
@@ -151,7 +151,7 @@ def test_saved_answer_is_replayed_when_chat_is_not_connected(client, saved_answe
 
 
 def test_saved_answer_without_panel_is_text_only(client, saved_answers):
-    body = {"messages": [{"role": "user", "content": "30대 여성은?"}], "scenario_id": "S5"}
+    body = {"messages": [{"role": "user", "content": "30대 여성은?"}], "scenario_id": "S6"}
     assert [e for e, _ in _events(client.post("/api/chat", json=body).text)][:2] == ["saved", "text"]
 
 

@@ -181,6 +181,16 @@ export type MessagePart =
   /** 목록에 없는 새 문항의 예측. 실측과 오차가 없다 */
   | { kind: "experimental"; prediction: Prediction };
 
+/** 대화 기록 목록의 한 줄. 서버 메모리에만 있어 서버를 끄면 사라진다 */
+export interface SessionSummary {
+  id: string;
+  title: string;
+  /** 초 단위 시각 */
+  updated_at: number;
+  /** 사용자가 보낸 질문 수 */
+  count: number;
+}
+
 /** 근거 단계. none: 질문만(일반 AI), data: 조사 데이터 + 단어 검색(RAG 없음), full: 개념 사전 + 참고 문서까지 */
 export type Grounding = "none" | "data" | "full";
 

@@ -209,3 +209,31 @@ def test_saved_answer_is_never_used_for_a_lower_grounding_level(client, saved_an
         body = {"messages": [{"role": "user", "content": "점유형태별로 보여 줘"}], "scenario_id": "S1", "grounding": level}
         events = _events(client.post("/api/chat", json=body).text)
         assert [e for e, _ in events] == ["error"] and events[0][1]["code"] == "no_api_key"
+
+
+# ---- 대화 기록: 서버 메모리에만 둔다 ----------------------------------------------------
+def test_sessions_are_saved_listed_loaded_and_deleted(client, monkeypatch):
+    from suwon_chat.sessions import SessionStore
+    monkeypatch.setattr(api, "sessions", SessionStore())
+    assert client.get("/api/sessions").json() == []
+    msgs = [{"id": 1, "role": "user", "content": "형편 어때?", "parts": []},
+            {"id": 2, "role": "assistant", "content": "답", "parts": [{"kind": "text", "text": "답"}]}]
+    saved = client.put("/api/sessions/abcd-1234", json={"title": "형편 어때?", "messages": msgs}).json()
+    assert saved["count"] == 1 and saved["title"] == "형편 어때?"
+    client.put("/api/sessions/efgh-5678", json={"title": "", "messages": msgs})
+    listing = client.get("/api/sessions").json()
+    assert [s["id"] for s in listing] == ["efgh-5678", "abcd-1234"]      # 최근 것부터
+    assert listing[0]["title"] == "새 대화"
+    assert client.get("/api/sessions/abcd-1234").json()["messages"] == msgs
+    assert client.delete("/api/sessions/abcd-1234").status_code == 200
+    assert client.get("/api/sessions/abcd-1234").status_code == 404
+    assert client.put("/api/sessions/../x", json={"messages": []}).status_code in (404, 405, 422)   # 저장되지 않는다
+    assert client.put("/api/sessions/short", json={"messages": []}).status_code == 422
+
+
+def test_session_store_drops_the_oldest_beyond_the_limit():
+    from suwon_chat.sessions import SessionStore
+    store = SessionStore(max_sessions=2)
+    for sid in ("a0000001", "a0000002", "a0000003"):
+        store.save(sid, sid, [])
+    assert {s["id"] for s in store.listing()} == {"a0000002", "a0000003"}

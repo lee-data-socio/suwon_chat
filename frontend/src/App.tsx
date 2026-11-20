@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  deleteSession,
   fetchChatStatus,
   fetchContext,
   fetchMeta,
   fetchQuestions,
   fetchScenarios,
+  fetchSession,
+  fetchSessions,
+  saveSession,
   storePrediction,
   streamChat,
 } from "./api";
@@ -19,6 +23,7 @@ import type {
   PanelState,
   QuestionSummary,
   Scenario,
+  SessionSummary,
   SideAnswer,
 } from "./types";
 import { useTheme } from "./lib/hooks";
@@ -27,6 +32,7 @@ import { usePrediction } from "./lib/usePrediction";
 import { Chat } from "./components/Chat";
 import { ReportModal } from "./components/ReportModal";
 import { ResultPanel } from "./components/ResultPanel";
+import { Sidebar } from "./components/Sidebar";
 import { TipProvider } from "./components/Tooltip";
 
 const FALLBACK: PanelState = { qkey: "q189_W2025", attribute: "TENURE", adapter: "exp1" };
@@ -66,6 +72,25 @@ function appendText(parts: MessagePart[], delta: string): MessagePart[] {
 }
 
 const COMPARE_STORE = "suwon-compare-with";
+const SIDE_STORE = "suwon-side-open";
+
+function newSessionId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
+function loadSideOpen(): boolean {
+  try {
+    const v = localStorage.getItem(SIDE_STORE);
+    if (v !== null) return v === "1";
+  } catch {
+    /* 기본값을 쓴다 */
+  }
+  return window.innerWidth > 900;
+}
 
 function loadCompareWith(): CompareWith {
   try {
@@ -104,6 +129,24 @@ export default function App() {
       /* 저장하지 못해도 이번 화면에서는 그대로 쓴다 */
     }
   }, [compareWith]);
+
+  // 대화 기록: 서버 메모리에만 있다. 지금 대화는 답변이 끝날 때마다 서버에 저장한다.
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sideOpen, setSideOpen] = useState<boolean>(loadSideOpen);
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDE_STORE, sideOpen ? "1" : "0");
+    } catch {
+      /* 저장하지 못해도 이번 화면에서는 그대로 쓴다 */
+    }
+  }, [sideOpen]);
+  const refreshSessions = useCallback(() => {
+    fetchSessions()
+      .then(setSessions)
+      .catch(() => setSessions([]));
+  }, []);
+  useEffect(refreshSessions, [refreshSessions]);
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [report, setReport] = useState<{ item: ContextItem; pages: number[] } | null>(null);
@@ -112,6 +155,55 @@ export default function App() {
   detailRef.current = detail;
 
   const { data: prediction, error: panelError, loading } = usePrediction(detail?.state ?? null);
+
+  const dirty = useRef(false); // 새 질문을 보낸 뒤 아직 저장하지 않았다 (기록을 열기만 했을 때는 저장하지 않는다)
+  useEffect(() => {
+    if (busy || !sessionId || !messages.length || !dirty.current) return;
+    dirty.current = false;
+    const title = messages.find((m) => m.role === "user")?.content.slice(0, 60) ?? "새 대화";
+    saveSession(sessionId, title, messages)
+      .then(refreshSessions)
+      .catch(() => {
+        /* 저장하지 못해도 화면의 대화는 그대로 있다 */
+      });
+    // 답변이 끝났을 때(busy가 풀릴 때)만 저장한다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, sessionId]);
+
+  const newChat = useCallback(() => {
+    if (busy) return;
+    setMessages([]);
+    setSessionId(null);
+    setDetail(null);
+  }, [busy]);
+
+  const openSession = useCallback(
+    (id: string) => {
+      if (busy || id === sessionId) return;
+      fetchSession(id)
+        .then((s) => {
+          setMessages(s.messages);
+          nextId.current = Math.max(0, ...s.messages.map((m) => m.id)) + 1;
+          setSessionId(s.id);
+          setDetail(null);
+        })
+        .catch(refreshSessions); // 서버를 다시 켜서 없어졌으면 목록을 새로 받는다
+    },
+    [busy, sessionId, refreshSessions],
+  );
+
+  const removeSession = useCallback(
+    (id: string) => {
+      if (busy && id === sessionId) return;
+      void deleteSession(id).then(refreshSessions);
+      if (id === sessionId) {
+        setMessages([]);
+        setSessionId(null);
+        setDetail(null);
+      }
+    },
+    [busy, sessionId, refreshSessions],
+  );
 
   useEffect(() => {
     Promise.all([fetchMeta(), fetchQuestions(), fetchScenarios()])
@@ -180,6 +272,8 @@ export default function App() {
     async (text: string, scenario?: Scenario) => {
       if (busy) return;
       const userMsg: ChatMessage = { id: nextId.current++, role: "user", content: text, parts: [] };
+      if (!sessionId) setSessionId(newSessionId());
+      dirty.current = true;
       const answerId = nextId.current++;
 
       // 추천 질문은 보여 줄 장면이 정해져 있다. 대화 모델을 기다리지 않고 결과 카드를 바로 놓는다.
@@ -363,7 +457,7 @@ export default function App() {
         setBusy(false);
       }
     },
-    [busy, chatStatus, compareWith, messages, openDetail],
+    [busy, chatStatus, compareWith, messages, openDetail, sessionId],
   );
 
   if (bootError)
@@ -377,6 +471,17 @@ export default function App() {
 
   return (
     <TipProvider>
+      <div className="shell">
+      <Sidebar
+        sessions={sessions}
+        activeId={sessionId}
+        open={sideOpen}
+        busy={busy}
+        onToggle={() => setSideOpen((v) => !v)}
+        onNew={newChat}
+        onOpen={openSession}
+        onDelete={removeSession}
+      />
       <div className={`app${detail ? " has-detail" : ""}`}>
         <Chat
           messages={messages}
@@ -409,6 +514,7 @@ export default function App() {
             onClose={() => setDetail(null)}
           />
         )}
+      </div>
       </div>
       {report && <ReportModal item={report.item} pages={report.pages} onClose={() => setReport(null)} />}
     </TipProvider>

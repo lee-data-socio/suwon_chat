@@ -1,4 +1,4 @@
-import type { ChatStatus, CompareKey, ContextItem, ContextResult, Grounding, Meta, PanelState, Prediction, QuestionSummary, Report, Scenario, Understanding } from "./types";
+import type { ChatMessage, ChatStatus, CompareKey, ContextItem, ContextResult, Grounding, Meta, PanelState, Prediction, QuestionSummary, Report, Scenario, SessionSummary, Understanding } from "./types";
 
 async function get<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -19,6 +19,24 @@ export const fetchQuestions = () => get<QuestionSummary[]>("/api/questions");
 export const fetchScenarios = () => get<Scenario[]>("/api/scenarios");
 export const fetchChatStatus = () => get<ChatStatus>("/api/chat/status");
 export const fetchReport = (docId: string) => get<Report>(`/api/reports/${encodeURIComponent(docId)}`);
+
+// ---- 대화 기록 (서버 메모리에만 있다. 서버를 끄면 사라진다) ----
+export const fetchSessions = () => get<SessionSummary[]>("/api/sessions");
+export const fetchSession = (id: string) =>
+  get<{ id: string; title: string; messages: ChatMessage[] }>(`/api/sessions/${encodeURIComponent(id)}`);
+
+export async function saveSession(id: string, title: string, messages: ChatMessage[]): Promise<void> {
+  const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, messages }),
+  });
+  if (!res.ok) throw new Error(`${res.status}`);
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  await fetch(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
 
 /** 문항과 관련된 참고 문서. 참고 문서가 연결되지 않았거나 실패하면 빈 목록으로 본다 (그 영역을 그리지 않는다). */
 export async function fetchContext(qkey: string): Promise<ContextItem[]> {

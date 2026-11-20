@@ -16,6 +16,8 @@
                            · saved {saved_at,model} (대화 모델 대신 저장된 답변을 내보낼 때 맨 앞에 온다)
                            · understanding {query,words,concepts,concepts_available} (문항을 찾을 때 한 번. 두 검색 방식의 후보)
                            요청의 grounding(none|data|full, 기본 full)으로 대화 모델에 주는 근거를 고른다 (chat.GROUNDING)
+    GET  /api/sessions     대화 기록 목록,  GET·PUT·DELETE /api/sessions/{id}  대화 하나
+                           서버 메모리에만 둔다. 서버를 끄면 사라진다 (suwon_chat.sessions)
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ from typing import Literal
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
+from fastapi import Path as FastPath
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -37,6 +40,7 @@ from .predict import LookupBackend
 from . import saved
 from .reports import LocalEmbedder, ReportIndex
 from .scenarios import SCENARIOS
+from .sessions import SessionStore
 from .service import NEW_MAX_OPTIONS, Invalid, NotFound, Service, Unsupported
 from .store import Store
 
@@ -109,6 +113,7 @@ def _guarded(embedder: LocalEmbedder):
 
 
 app = FastAPI(title="수원서베이 시연 챗봇", lifespan=lifespan)
+sessions = SessionStore()     # 대화 기록. 서버 메모리에만 있다
 
 
 def svc() -> Service:
@@ -282,6 +287,41 @@ async def chat(req: ChatRequest):
 
 # 빌드한 화면(frontend/dist)을 같은 서버에서 내보낸다. 요청마다 파일을 찾으므로 화면을 다시 빌드해도
 # 서버를 다시 켤 필요가 없다. (개발 중에는 Vite 개발 서버가 /api를 이쪽으로 넘긴다.)
+# ---- 대화 기록 (서버 메모리에만) --------------------------------------------------
+SESSION_ID = r"^[A-Za-z0-9-]{8,64}$"
+
+
+class SessionIn(BaseModel):
+    title: str = Field(default="", max_length=200)
+    # 화면의 메시지를 그대로 받는다. 서버는 내용을 해석하지 않고 돌려주기만 한다
+    messages: list[dict] = Field(max_length=400)
+
+
+@app.get("/api/sessions")
+def list_sessions():
+    return sessions.listing()
+
+
+@app.get("/api/sessions/{sid}")
+def get_session(sid: str = FastPath(pattern=SESSION_ID)):
+    item = sessions.get(sid)
+    if item is None:
+        raise HTTPException(404, "없는 대화다 (서버를 다시 켜면 대화 기록은 지워진다)")
+    return item
+
+
+@app.put("/api/sessions/{sid}")
+def save_session(body: SessionIn, sid: str = FastPath(pattern=SESSION_ID)):
+    return sessions.save(sid, body.title, body.messages)
+
+
+@app.delete("/api/sessions/{sid}")
+def delete_session(sid: str = FastPath(pattern=SESSION_ID)):
+    if not sessions.delete(sid):
+        raise HTTPException(404, "없는 대화다")
+    return {"deleted": sid}
+
+
 @app.get("/{path:path}", include_in_schema=False)
 def spa(path: str):
     if path == "api" or path.startswith("api/"):

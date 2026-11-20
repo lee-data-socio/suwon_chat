@@ -108,6 +108,163 @@ p {
 /* ---- 틀 ------------------------------------------------------------- */
 
 /* 기본은 채팅 하나다. '자세히 보기'를 누르면 오른쪽에 상세 패널이 열려 둘로 나뉜다. */
+/* 왼쪽 대화 기록 + 앱 */
+.shell {
+  display: flex;
+  height: 100vh;
+}
+
+.shell > .app {
+  flex: 1;
+  min-width: 0;
+}
+
+.side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 248px;
+  height: 100vh;
+  border-right: 1px solid var(--line);
+  background: var(--page);
+}
+
+.side.is-closed {
+  width: 52px;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.side-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 6px;
+}
+
+.side-new {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.side-new:hover:not(:disabled) {
+  border-color: var(--line-2);
+  background: var(--surface-2);
+}
+
+.side-head {
+  padding: 10px 16px 6px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.side-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding: 0 8px;
+  overflow-y: auto;
+}
+
+.side-item {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border-radius: 9px;
+}
+
+.side-item:hover,
+.side-item.is-active {
+  background: var(--surface-3);
+}
+
+.side-open {
+  display: grid;
+  flex: 1;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px 4px 7px 9px;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  text-align: left;
+}
+
+.side-item.is-active .side-open {
+  color: var(--ink);
+}
+
+.side-title {
+  overflow: hidden;
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.side-meta {
+  grid-column: 2;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.side-del {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-3);
+  opacity: 0;
+}
+
+.side-item:hover .side-del,
+.side-del:focus-visible {
+  opacity: 1;
+}
+
+.side-del:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.side-empty,
+.side-foot {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.side-foot {
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+}
+
+@media (hover: none) {
+  .side-del {
+    opacity: 1;
+  }
+}
+
 .app {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

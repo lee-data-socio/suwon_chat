@@ -22,3 +22,4 @@ node_modules/
 # 내부용 문서 (공개하지 않는다): 기획 문서, 시연 진행표
 /docs/PRD.md
 /docs/DEMO.md
+/ppt/

@@ -14,6 +14,8 @@
     POST /api/chat         대화. 응답은 SSE(text/event-stream)이고 이벤트는
                            status {tool,text} · text {delta} · panel {state,compare,prediction} · new_prediction {prediction} · context {qkey,query,items} · done {stop_reason} · error {code,message}
                            · saved {saved_at,model} (대화 모델 대신 저장된 답변을 내보낼 때 맨 앞에 온다)
+                           · understanding {query,words,concepts,concepts_available} (문항을 찾을 때 한 번. 두 검색 방식의 후보)
+                           요청의 grounding(none|data|full, 기본 full)으로 대화 모델에 주는 근거를 고른다 (chat.GROUNDING)
 """
 from __future__ import annotations
 
@@ -30,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from . import config
 from .chat import chat_status, run_chat
+from .concepts import QuestionIndex
 from .predict import LookupBackend
 from . import saved
 from .reports import LocalEmbedder, ReportIndex
@@ -69,7 +72,8 @@ async def lifespan(app: FastAPI):
         threading.Thread(target=_warm_scenarios, args=(app.state.service,), daemon=True).start()
     embedder = LocalEmbedder()
     app.state.reports = ReportIndex(config.REPORTS_INDEX, config.REPORTS_VECTORS, _guarded(embedder))
-    if app.state.reports.available and config.WARM_EMBEDDER:
+    app.state.concepts = QuestionIndex(config.CONCEPTS_INDEX, config.CONCEPTS_VECTORS, _guarded(embedder))
+    if (app.state.reports.available or app.state.concepts.available) and config.WARM_EMBEDDER:
         # 첫 검색이 느리지 않게 임베딩 모델을 미리 올려 둔다. 서버 시작은 기다리게 하지 않는다.
         threading.Thread(target=_warm, args=(embedder,), daemon=True).start()
     yield
@@ -113,6 +117,10 @@ def svc() -> Service:
 
 def reports() -> ReportIndex:
     return app.state.reports
+
+
+def concepts() -> QuestionIndex:
+    return app.state.concepts
 
 
 @app.get("/api/meta")
@@ -209,6 +217,8 @@ class ChatRequest(BaseModel):
     panel: PanelState | None = None
     # 추천 질문 버튼으로 보낸 질문이면 그 id. 대화 모델을 쓸 수 없을 때 저장된 답변으로 넘어가는 데 쓴다.
     scenario_id: str | None = Field(default=None, max_length=40)
+    # 근거 단계 (chat.GROUNDING). 화면의 비교 보기가 같은 질문을 근거를 달리해 한 번 더 보낼 때 쓴다.
+    grounding: Literal["none", "data", "full"] = "full"
 
 
 def _valid_panel(panel: PanelState | None) -> dict | None:
@@ -231,9 +241,10 @@ def _sse(event: str, data: dict) -> str:
 async def chat(req: ChatRequest):
     if req.messages[-1].role != "user" or not req.messages[-1].content.strip():
         raise HTTPException(400, "마지막 메시지는 비어 있지 않은 사용자 메시지여야 한다")
-    panel = _valid_panel(req.panel)
+    panel = _valid_panel(req.panel) if req.grounding != "none" else None
 
-    answer = saved.load().get(req.scenario_id) if req.scenario_id else None
+    # 저장된 답변은 근거를 다 준 답(full)만 있다. 다른 단계에 그것을 내보내면 비교가 거짓이 된다.
+    answer = saved.load().get(req.scenario_id) if req.scenario_id and req.grounding == "full" else None
 
     async def live():
         if not chat_status()["available"]:
@@ -243,7 +254,8 @@ async def chat(req: ChatRequest):
         # 발표 중에 오래 매달리지 않게 한다. 연결 5초, 응답 60초, 재시도 1번.
         client = anthropic.AsyncAnthropic(timeout=anthropic.Timeout(60.0, connect=5.0), max_retries=1)
         try:
-            async for item in run_chat(client, svc(), [m.model_dump() for m in req.messages], panel, reports()):
+            async for item in run_chat(client, svc(), [m.model_dump() for m in req.messages], panel, reports(),
+                                       grounding=req.grounding, concepts=concepts()):
                 yield item
         except Exception:
             # 어떤 실패든 화면이 기다리기만 하지 않도록 error 이벤트로 끝낸다

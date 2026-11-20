@@ -240,3 +240,15 @@ def test_group_order_flag_is_true_only_for_identical_order(service):
     assert same["순서가_완전히_같음"] is True and same["예측"] == same["실측"]
     diff = service.prediction_brief("q120_1_W2025", "AGE", "exp3")["집단_순서"]
     assert diff["순서가_완전히_같음"] is False and diff["예측"] != diff["실측"]
+
+
+def test_brief_gives_past_survey_values_for_each_group(service):
+    p = service.prediction("q132_1_W2025", "TENURE", "exp1")
+    b = service.prediction_brief("q132_1_W2025", "TENURE", "exp1")
+    assert b["지난_조사_연도"] == p["question"]["history_years"] and 2024 in b["지난_조사_연도"]
+    for row, g in zip(b["집단별"], p["groups"]):
+        past = {f"{h['year']}년": round(h["mean"], 2) for h in g["history"]}
+        assert row["지난_조사_평균"] == past
+    # 지난 조사에 같은 형태로 없던 문항은 연도가 비고 값도 없다
+    none = service.prediction_brief("q74_W2025", "SEX", "exp1")
+    assert none["지난_조사_연도"] == [] and all("지난_조사_평균" not in r for r in none["집단별"])

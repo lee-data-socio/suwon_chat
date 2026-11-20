@@ -181,6 +181,38 @@ export type MessagePart =
   /** 목록에 없는 새 문항의 예측. 실측과 오차가 없다 */
   | { kind: "experimental"; prediction: Prediction };
 
+/** 근거 단계. none: 질문만(일반 AI), data: 조사 데이터 + 단어 검색(RAG 없음), full: 개념 사전 + 참고 문서까지 */
+export type Grounding = "none" | "data" | "full";
+
+/** 비교 보기에서 평소 답변 옆에 함께 띄울 단계 */
+export type CompareWith = "off" | "none" | "data";
+
+/** 비교 보기의 옆 칸 답변. 자기만의 대화 이력으로 따로 받는다 */
+export interface SideAnswer {
+  grounding: Grounding;
+  content: string;
+  parts: MessagePart[];
+  pending?: boolean;
+  status?: string;
+  notice?: string;
+}
+
+/** '질문 이해' 칸의 문항 후보 하나 */
+export interface QuestionCandidate {
+  qkey: string;
+  text: string;
+  /** 개념 사전 검색일 때 그 문항의 개념 */
+  concept: string | null;
+}
+
+/** 같은 질문을 단어 검색과 개념 사전 검색(RAG)으로 각각 찾은 문항 후보 */
+export interface Understanding {
+  query: string;
+  words: QuestionCandidate[];
+  concepts: QuestionCandidate[];
+  concepts_available: boolean;
+}
+
 export interface ChatMessage {
   id: number;
   role: "user" | "assistant";
@@ -197,4 +229,8 @@ export interface ChatMessage {
   context?: ContextItem[];
   /** 대화 모델이 지금 쓴 답이 아니라 미리 저장해 둔 답변일 때 */
   saved?: { saved_at: string; model: string };
+  /** 이 답변에서 문항을 찾을 때의 두 검색 결과 */
+  understanding?: Understanding;
+  /** 비교 보기를 켰을 때 같은 질문을 근거를 달리해 받은 답변 */
+  compareAnswer?: SideAnswer;
 }

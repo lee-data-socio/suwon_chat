@@ -922,6 +922,234 @@
   white-space: nowrap;
 }
 
+/* 비교 보기: 같은 질문을 근거를 달리해 받은 두 답변을 나란히 */
+.chat-col.is-duo {
+  max-width: 1240px;
+}
+
+.duo {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.chat.is-split .duo {
+  grid-template-columns: 1fr;
+}
+
+@media (max-width: 900px) {
+  .duo {
+    grid-template-columns: 1fr;
+  }
+}
+
+.duo-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.duo-col.is-main {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-soft);
+}
+
+.duo-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--line-2);
+  line-height: 1.4;
+}
+
+.duo-label strong {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.duo-label.is-main strong {
+  color: var(--accent-ink);
+}
+
+.duo-label span {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.ground {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ground-label {
+  margin-right: 2px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+/* 질문 이해: 같은 질문을 단어 검색과 개념 사전 검색(RAG)으로 찾은 문항 후보 */
+.und {
+  margin-bottom: 14px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  line-height: 1.45;
+}
+
+.und-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.und-head::-webkit-details-marker {
+  display: none;
+}
+
+.und-head strong {
+  color: var(--ink-2);
+  font-weight: 650;
+}
+
+.und-chevron {
+  margin-left: auto;
+  transition: transform 0.15s;
+}
+
+.und:not([open]) .und-chevron {
+  transform: rotate(-90deg);
+}
+
+.und-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 9px;
+}
+
+.chat.is-split .und-cols {
+  grid-template-columns: 1fr;
+}
+
+@media (max-width: 640px) {
+  .und-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.und-col {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.und-col.is-rag {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-soft);
+}
+
+.und-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.und-title em {
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.is-rag .und-title em {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.und-note {
+  margin: 2px 0 8px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+
+.und-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+}
+
+.und-list li {
+  color: var(--ink-2);
+}
+
+.und-list li::marker {
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+
+.und-list li.is-picked {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.und-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.und-concept {
+  display: block;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.und-picked {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 2px;
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.und-empty {
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
 /* 문서 보기 */
 .report {
   display: flex;

@@ -44,9 +44,9 @@ class FakeClient:
         return FakeStream(self.turns.pop(0))
 
 
-def collect(client, service, history, panel=None, reports=None):
+def collect(client, service, history, panel=None, reports=None, grounding="full", concepts=None):
     async def go():
-        return [e async for e in run_chat(client, service, history, panel, reports)]
+        return [e async for e in run_chat(client, service, history, panel, reports, grounding, concepts)]
     return asyncio.run(go())
 
 
@@ -146,10 +146,12 @@ def test_loop_stops_after_too_many_tool_turns(service):
 
 def test_system_prompt_lists_every_question_and_the_limits(service):
     prompt = system_prompt(service)
-    for q in service.store.target_questions:
-        assert q.qkey in prompt
+    # 문항 목록은 주지 않는다. 문항은 search_questions로 찾는다 (로컬 모델은 목록 전체를 받아 판단하기 어렵다)
+    named = [q.qkey for q in service.store.target_questions if q.qkey in prompt]
+    assert len(named) <= 4          # 문항 제외 어댑터가 뺀 문항만 이름이 나온다
+    assert "먼저 `search_questions`로 찾고" in prompt and "질문을 어떻게 이해했나" in prompt
     for phrase in ["교차 집단", "연도에 따른 변화", "새 문항", "모델의 이유는 지어내지 않는다", "집단 사이의 차이를 과장하지 않는다",
-                   "표본이 적은 집단", "전체 학습 어댑터"]:
+                   "표본이 적은 집단", "전체 학습 어댑터", "지난_조사_평균", "예측에 쓴 근거가 아니다", "수원서베이로 학습한 AI"]:
         assert phrase in prompt
 
 
@@ -261,3 +263,92 @@ def test_question_keys_are_removed_from_the_answer_text(service):
     client = FakeClient([{"text": ["경제·사회적 위치 문항(q189", "_W2025)을 봤습니다."]}])
     events = collect(client, service, [{"role": "user", "content": "보여 줘"}])
     assert "".join(d["delta"] for e, d in events if e == "text") == "경제·사회적 위치 문항을 봤습니다."
+
+
+# ---- 근거 단계: 같은 대화 모델에 근거를 얼마나 주느냐만 바꾼다 ----------------------------
+PANEL = {"qkey": "q189_W2025", "attribute": "TENURE", "adapter": "exp1"}
+
+
+def test_general_level_gets_only_the_question(service, report_index):
+    client = FakeClient([{"text": ["일반적으로 자가 거주자가 높게 답하는 경향이 있습니다."]}])
+    history = [{"role": "user", "content": "점유형태별로 경제·사회적 위치를 어떻게 답할지 예측해 줘"}]
+    events = collect(client, service, history, PANEL, report_index, grounding="none")
+    assert [e for e, _ in events] == ["text", "done"]
+    call = client.calls[0]
+    assert "tools" not in call and "tool_choice" not in call
+    assert call["system"] == [{"type": "text", "text": chat.GENERAL_PROMPT}]
+    # 화면 상태(문항 문구, qkey)도, 문항 목록도 넘어가지 않는다
+    assert call["messages"] == history
+    assert "q189" not in json.dumps(call, ensure_ascii=False, default=str)
+
+
+def test_data_level_has_predictions_but_no_documents(service, report_index):
+    args = {**PANEL, "compare": "actual"}
+    client = FakeClient([{"tools": [("get_prediction", args)], "stop": "tool_use"}, {"text": ["네."]}])
+    events = collect(client, service, [{"role": "user", "content": "보여 줘"}], None, report_index, grounding="data")
+    assert [e for e, _ in events] == ["status", "panel", "text", "done"]          # context 이벤트가 없다
+    first = client.calls[0]
+    assert "search_reports" not in [t["name"] for t in first["tools"]]
+    assert chat.REPORTS_WITHHELD in first["system"][0]["text"]
+    brief = json.loads(client.calls[1]["messages"][-1]["content"][0]["content"])
+    assert "참고_문서" not in brief
+
+
+def test_full_level_attaches_documents(service, report_index):
+    args = {**PANEL, "compare": "actual"}
+    client = FakeClient([{"tools": [("get_prediction", args)], "stop": "tool_use"}, {"text": ["네."]}])
+    events = collect(client, service, [{"role": "user", "content": "보여 줘"}], None, report_index)
+    assert "context" in [e for e, _ in events]
+    assert "search_reports" in [t["name"] for t in client.calls[0]["tools"]]
+    assert "참고_문서" in json.loads(client.calls[1]["messages"][-1]["content"][0]["content"])
+
+
+def test_unknown_level_is_rejected_without_calling_the_api(service):
+    client = FakeClient([])
+    events = collect(client, service, [{"role": "user", "content": "질문"}], grounding="anything")
+    assert [e for e, _ in events] == ["error"] and client.calls == []
+
+
+
+# ---- 문항 찾기: full은 개념 사전, data는 단어 검색 ------------------------------------------
+def _search_result(service, report_index, concept_index, grounding):
+    client = FakeClient([{"tools": [("search_questions", {"query": "월세 사는 사람들 형편 살림살이"})], "stop": "tool_use"},
+                         {"text": ["네."]}])
+    collect(client, service, [{"role": "user", "content": "월세 사는 사람들 형편 어때?"}], None, report_index,
+            grounding, concept_index)
+    tool = next(t for t in client.calls[0]["tools"] if t["name"] == "search_questions")
+    return tool, json.loads(client.calls[1]["messages"][-1]["content"][0]["content"])
+
+
+def test_full_level_finds_questions_with_the_concept_dictionary(service, report_index, concept_index):
+    tool, result = _search_result(service, report_index, concept_index, "full")
+    assert "개념 사전" in tool["description"]
+    assert all("개념" in r and "정의" in r for r in result["결과"])
+    assert {"q189_W2025", "q121_2_W2025"} & {r["qkey"] for r in result["결과"]}     # 형편·살림살이를 일상 표현으로 둔 문항
+
+
+def test_data_level_finds_questions_by_words_only(service, report_index, concept_index):
+    tool, result = _search_result(service, report_index, concept_index, "data")
+    assert "글자 그대로" in tool["description"]
+    assert all("개념" not in r for r in result["결과"])
+
+
+def test_understanding_shows_both_searches_for_the_users_own_words(service, report_index, concept_index):
+    q = "가구 부채 빚 대출"
+    client = FakeClient([{"tools": [("search_questions", {"query": "빚"})], "stop": "tool_use"},
+                         {"tools": [("search_questions", {"query": "대출"})], "stop": "tool_use"},
+                         {"text": ["네."]}])
+    events = collect(client, service, [{"role": "user", "content": q}], None, report_index, "data", concept_index)
+    shown = [d for e, d in events if e == "understanding"]
+    assert len(shown) == 1                                   # 한 답변에 한 번
+    u = shown[0]
+    assert u["query"] == q                                   # 대화 모델의 검색어가 아니라 사용자의 질문 그대로
+    assert u["concepts_available"] and u["concepts"][0]["qkey"] == "q28_W2025" and u["concepts"][0]["concept"]
+    assert all(w["concept"] is None for w in u["words"])
+
+
+def test_no_understanding_when_no_question_search(service):
+    args = {**PANEL, "compare": "actual"}
+    client = FakeClient([{"tools": [("get_prediction", args)], "stop": "tool_use"}, {"text": ["네."]}])
+    events = collect(client, service, [{"role": "user", "content": "연령별로 바꿔 줘"}])
+    assert "understanding" not in [e for e, _ in events]

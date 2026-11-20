@@ -31,6 +31,10 @@ FRONTEND_DIST = ROOT / "frontend" / "dist"
 REPORTS_DIR = Path(os.environ.get("SUWON_REPORTS_DIR", ROOT / "reports"))
 REPORTS_INDEX = DB_PATH.parent / "reports_index.json"
 REPORTS_VECTORS = DB_PATH.parent / "reports_vectors.npy"
+# 개념 사전과 문항 검색 색인. 담당자의 일상어 질문을 맞는 문항에 잇는다 (suwon_chat/concepts.py)
+CONCEPTS_FILE = Path(os.environ.get("SUWON_CONCEPTS_FILE", ROOT / "concepts" / "개념사전.md"))
+CONCEPTS_INDEX = DB_PATH.parent / "concepts_index.json"
+CONCEPTS_VECTORS = DB_PATH.parent / "concepts_vectors.npy"
 # 서버를 켤 때 임베딩 모델을 미리 올릴지. 꺼도 첫 검색 때 올라간다.
 WARM_EMBEDDER = os.environ.get("SUWON_WARM_EMBEDDER", "1") != "0"
 

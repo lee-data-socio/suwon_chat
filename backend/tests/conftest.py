@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 
 os.environ["SUWON_WARM_EMBEDDER"] = "0"      # 테스트에서는 임베딩 모델을 올리지 않는다
+# .env가 gguf/live여도 테스트는 저장된 예측만 쓴다. TestClient가 서버 시작 때 8B 모델을 올려 메모리가 바닥난다.
+os.environ["PREDICT_BACKEND"] = "lookup"
 
 import pytest
 
@@ -102,3 +104,12 @@ def report_index(tmp_path_factory, service) -> ReportIndex:
     # 가짜 임베딩은 점수 분포가 실제 모델과 달라 문턱을 끈다. 문턱은 test_reports에서 따로 본다.
     return ReportIndex(out / "index.json", out / "vectors.npy", fake_embed, min_score=0.0, margin=1.0,
                        unlisted_min_score=0.0)
+
+
+@pytest.fixture(scope="session")
+def concept_index(tmp_path_factory, service):
+    """실제 개념 사전으로 만든 문항 검색 색인. 임베딩만 가짜다."""
+    from suwon_chat.concepts import QuestionIndex, build_index as build_concepts
+    out = tmp_path_factory.mktemp("concept_index")
+    build_concepts(service.store.target_questions, config.CONCEPTS_FILE, fake_embed, out / "index.json", out / "vectors.npy")
+    return QuestionIndex(out / "index.json", out / "vectors.npy", fake_embed)

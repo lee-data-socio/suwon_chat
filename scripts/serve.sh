@@ -12,4 +12,8 @@ fi
 if [ ! -f ../data/reports_index.json ]; then
   "$PYTHON" -m suwon_chat.reports
 fi
+# 문항 검색 색인이 없으면 담당자식 질문을 단어 검색으로만 찾는다. 없으면 만든다
+if [ ! -f ../data/concepts_index.json ]; then
+  "$PYTHON" -m suwon_chat.concepts
+fi
 exec "$PYTHON" -m uvicorn suwon_chat.api:app --host 127.0.0.1 --port "$PORT"

@@ -12,12 +12,14 @@ import type {
   ChatMessage,
   ChatStatus,
   CompareKey,
+  CompareWith,
   ContextItem,
   Meta,
   MessagePart,
   PanelState,
   QuestionSummary,
   Scenario,
+  SideAnswer,
 } from "./types";
 import { useTheme } from "./lib/hooks";
 import { REFERENCE_ID, setAdapters, setLive } from "./lib/labels";
@@ -51,6 +53,29 @@ function fromUrl(): { panel: Partial<PanelState>; compare: CompareKey[] | null }
   return { panel, compare };
 }
 
+/** 답변 조각 끝에 글을 잇는다. 카드 뒤에 새로 시작하는 글은 앞의 빈 줄을 뗀다 */
+function appendText(parts: MessagePart[], delta: string): MessagePart[] {
+  const next = parts.slice();
+  const last = next[next.length - 1];
+  if (last?.kind === "text") next[next.length - 1] = { kind: "text", text: last.text + delta };
+  else {
+    const t = delta.replace(/^\s+/, "");
+    if (t) next.push({ kind: "text", text: t });
+  }
+  return next;
+}
+
+const COMPARE_STORE = "suwon-compare-with";
+
+function loadCompareWith(): CompareWith {
+  try {
+    const v = localStorage.getItem(COMPARE_STORE);
+    return v === "none" || v === "data" ? v : "off";
+  } catch {
+    return "off";
+  }
+}
+
 /** 대화에서 마지막으로 보여 준 장면. 다음 질문에서 "속성만 바꿔 줘" 같은 말을 풀 때 대화 모델에 알려 준다. */
 function lastShown(messages: ChatMessage[]): PanelState | null {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -70,6 +95,15 @@ export default function App() {
   const [bootError, setBootError] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // 비교 보기: 같은 질문을 근거를 달리해(일반 AI / RAG 없음) 한 번 더 받아 평소 답변 옆에 띄운다
+  const [compareWith, setCompareWith] = useState<CompareWith>(loadCompareWith);
+  useEffect(() => {
+    try {
+      localStorage.setItem(COMPARE_STORE, compareWith);
+    } catch {
+      /* 저장하지 못해도 이번 화면에서는 그대로 쓴다 */
+    }
+  }, [compareWith]);
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [report, setReport] = useState<{ item: ContextItem; pages: number[] } | null>(null);
@@ -164,8 +198,77 @@ export default function App() {
         .filter((m) => m.content.trim())
         .map((m) => ({ role: m.role, content: m.content }));
       const current = shown ?? detailRef.current?.state ?? lastShown(messages);
-      setMessages((list) => [...list, userMsg, { id: answerId, role: "assistant", content: "", parts, pending: true }]);
+      const side = compareWith === "off" ? null : compareWith;
+      setMessages((list) => [
+        ...list,
+        userMsg,
+        {
+          id: answerId,
+          role: "assistant",
+          content: "",
+          parts,
+          pending: true,
+          ...(side ? { compareAnswer: { grounding: side, content: "", parts: [], pending: true } } : {}),
+        },
+      ]);
       setBusy(true);
+
+      // 옆 칸: 자기만의 대화 이력으로 따로 받는다. 평소 답변(실제 수치)이 넘어가면 비교가 흐려진다.
+      const patchSide = (fn: (s: SideAnswer) => SideAnswer) =>
+        patchMessage(answerId, (m) => (m.compareAnswer ? { ...m, compareAnswer: fn(m.compareAnswer) } : m));
+      const runSide = async () => {
+        if (!side) return;
+        type Turn = { role: "user" | "assistant"; content: string };
+        const sideHistory = [...messages, userMsg].flatMap((m): Turn[] =>
+          m.role === "user"
+            ? [{ role: "user", content: m.content }]
+            : m.compareAnswer?.content.trim()
+              ? [{ role: "assistant", content: m.compareAnswer.content }]
+              : [],
+        );
+        let ended = false;
+        try {
+          await streamChat(
+            sideHistory,
+            current,
+            (e) => {
+              switch (e.type) {
+                case "status":
+                  patchSide((s) => ({ ...s, status: e.text }));
+                  break;
+                case "text":
+                  patchSide((s) => ({ ...s, parts: appendText(s.parts, e.delta), status: undefined, content: s.content + e.delta }));
+                  break;
+                case "panel": {
+                  storePrediction(e.state, e.prediction);
+                  const card: MessagePart = { kind: "card", state: e.state, compare: e.compare === "actual" ? null : e.compare };
+                  patchSide((s) => ({ ...s, parts: [...s.parts, card], status: undefined }));
+                  break;
+                }
+                case "new_prediction":
+                  patchSide((s) => ({ ...s, parts: [...s.parts, { kind: "experimental", prediction: e.prediction }], status: undefined }));
+                  break;
+                case "done":
+                  ended = true;
+                  break;
+                case "error":
+                  ended = true;
+                  patchSide((s) => ({ ...s, notice: e.message }));
+                  break;
+              }
+            },
+            undefined,
+            undefined,
+            side,
+          );
+          if (!ended) patchSide((s) => ({ ...s, notice: "답변이 중간에 끊겼습니다." }));
+        } catch {
+          patchSide((s) => ({ ...s, notice: "서버와 연결이 끊겼습니다." }));
+        } finally {
+          patchSide((s) => ({ ...s, pending: false, status: undefined }));
+        }
+      };
+      const sideDone = runSide();
       let finished = false; // done이나 error를 받았는가
       let gotContext = false;
       try {
@@ -221,6 +324,11 @@ export default function App() {
                 return { ...m, context: [...have, ...e.items.filter((it) => !seen.has(`${it.doc_id}:${it.page}`))] };
               });
               break;
+            case "understanding": {
+              const { type: _t, ...u } = e;
+              patchMessage(answerId, (m) => ({ ...m, understanding: u }));
+              break;
+            }
             case "saved":
               patchMessage(answerId, (m) => ({ ...m, saved: { saved_at: e.saved_at, model: e.model } }));
               break;
@@ -251,10 +359,11 @@ export default function App() {
         }));
       } finally {
         patchMessage(answerId, (m) => ({ ...m, pending: false, status: undefined }));
+        await sideDone;
         setBusy(false);
       }
     },
-    [busy, chatStatus, messages, openDetail],
+    [busy, chatStatus, compareWith, messages, openDetail],
   );
 
   if (bootError)
@@ -280,6 +389,8 @@ export default function App() {
           canPredictNew={meta?.can_predict_new === true}
           onToggleTheme={toggleTheme}
           onSend={send}
+          compareWith={compareWith}
+          onCompareWith={setCompareWith}
           onDetail={openDetail}
           onOpenReport={(item, pages) => setReport({ item, pages })}
         />

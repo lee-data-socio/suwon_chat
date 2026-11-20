@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Archive, ArrowUp, BarChart3, LoaderCircle, Moon, Sun } from "lucide-react";
-import type { ChatMessage, ChatStatus, CompareKey, ContextItem, PanelState, Scenario } from "../types";
+import type { ChatMessage, ChatStatus, CompareKey, CompareWith, ContextItem, MessagePart, PanelState, Scenario } from "../types";
 import type { Theme } from "../lib/color";
 import { Markdown } from "../lib/markdown";
 import { ContextCards } from "./ContextCards";
 import { ExperimentalCard } from "./ExperimentalCard";
 import { ResultCard } from "./ResultCard";
+import { UnderstandingCard } from "./UnderstandingCard";
 import { Hint } from "./Tooltip";
 
 interface Props {
@@ -24,7 +25,23 @@ interface Props {
   onSend: (text: string, scenario?: Scenario) => void;
   onDetail: (state: PanelState, compare: CompareKey | null) => void;
   onOpenReport: (item: ContextItem, pages: number[]) => void;
+  /** 비교 보기: 평소 답변 옆에 함께 띄울 단계 */
+  compareWith: CompareWith;
+  onCompareWith: (v: CompareWith) => void;
 }
+
+/** 비교 보기의 칸 이름 */
+const SIDE_LABEL: Record<"none" | "data" | "full", { name: string; note: string }> = {
+  none: { name: "일반 AI", note: "질문만 받음 · 조사 데이터와 문서 없음" },
+  data: { name: "RAG 없음", note: "조사 데이터 + 단어 검색" },
+  full: { name: "수원서베이 AI", note: "조사 데이터 + 개념 사전 + 참고 문서" },
+};
+
+const COMPARE_OPTIONS: { value: CompareWith; label: string }[] = [
+  { value: "off", label: "끔" },
+  { value: "none", label: "일반 AI와" },
+  { value: "data", label: "RAG 없이와" },
+];
 
 const keyOf = (s: PanelState) => `${s.qkey}|${s.attribute}|${s.adapter}`;
 
@@ -42,6 +59,8 @@ export function Chat({
   onSend,
   onDetail,
   onOpenReport,
+  compareWith,
+  onCompareWith,
 }: Props) {
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -97,6 +116,38 @@ export function Chat({
 
   const empty = count === 0;
 
+  /** 답변 본문: 글, 결과 카드, 진행 표시, 안내 */
+  const body = (a: { parts: MessagePart[]; status?: string; pending?: boolean; notice?: string }) => (
+    <>
+      {a.parts.map((part, i) =>
+        part.kind === "text" ? (
+          <Markdown key={i} text={part.text} />
+        ) : part.kind === "experimental" ? (
+          <ExperimentalCard key={i} p={part.prediction} theme={theme} />
+        ) : (
+          <ResultCard
+            key={i}
+            state={part.state}
+            compare={part.compare}
+            theme={theme}
+            compact={split || compareWith !== "off"}
+            active={detailKey === keyOf(part.state)}
+            onDetail={onDetail}
+          />
+        ),
+      )}
+      {a.status && <div className="msg-status">{a.status}…</div>}
+      {a.pending && !a.status && !(a.parts.at(-1)?.kind === "text") && (
+        <div className="typing" aria-label="답변을 쓰는 중">
+          <i />
+          <i />
+          <i />
+        </div>
+      )}
+      {a.notice && <div className="msg-notice">{a.notice}</div>}
+    </>
+  );
+
   return (
     <section className={`chat${split ? " is-split" : ""}`}>
       <header className="top">
@@ -119,7 +170,7 @@ export function Chat({
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
       >
-        <div className={`chat-col${empty ? " is-empty" : ""}`}>
+        <div className={`chat-col${empty ? " is-empty" : ""}${compareWith !== "off" ? " is-duo" : ""}`}>
           {empty && (
             <div className="hero">
               <h1>수원서베이 응답 예측</h1>
@@ -155,32 +206,26 @@ export function Chat({
                     <Archive size={12} aria-hidden /> 저장된 답변
                   </span>
                 )}
-                {m.parts.map((part, i) =>
-                  part.kind === "text" ? (
-                    <Markdown key={i} text={part.text} />
-                  ) : part.kind === "experimental" ? (
-                    <ExperimentalCard key={i} p={part.prediction} theme={theme} />
-                  ) : (
-                    <ResultCard
-                      key={i}
-                      state={part.state}
-                      compare={part.compare}
-                      theme={theme}
-                      compact={split}
-                      active={detailKey === keyOf(part.state)}
-                      onDetail={onDetail}
-                    />
-                  ),
+                {m.understanding && (
+                  <UnderstandingCard
+                    u={m.understanding}
+                    picked={m.parts.flatMap((p) => (p.kind === "card" ? [p.state.qkey] : []))}
+                  />
                 )}
-                {m.status && <div className="msg-status">{m.status}…</div>}
-                {m.pending && !m.status && !(m.parts.at(-1)?.kind === "text") && (
-                  <div className="typing" aria-label="답변을 쓰는 중">
-                    <i />
-                    <i />
-                    <i />
+                {m.compareAnswer ? (
+                  <div className="duo">
+                    <div className="duo-col is-side">
+                      <DuoLabel grounding={m.compareAnswer.grounding} />
+                      {body(m.compareAnswer)}
+                    </div>
+                    <div className="duo-col is-main">
+                      <DuoLabel grounding="full" />
+                      {body(m)}
+                    </div>
                   </div>
+                ) : (
+                  body(m)
                 )}
-                {m.notice && <div className="msg-notice">{m.notice}</div>}
                 {m.context && m.context.length > 0 && !m.pending && <ContextCards items={m.context} onOpen={onOpenReport} />}
               </div>
             ),
@@ -190,6 +235,21 @@ export function Chat({
 
       <footer className="chat-foot">
         <div className="chat-col">
+          <div className="ground" role="radiogroup" aria-label="비교해서 보기">
+            <span className="ground-label">비교해서 보기</span>
+            {COMPARE_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                role="radio"
+                aria-checked={compareWith === o.value}
+                className={`chip${compareWith === o.value ? " is-on" : ""}`}
+                disabled={busy}
+                onClick={() => onCompareWith(o.value)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
           {!empty && (
             <div className="quick" aria-label="추천 질문">
               {scenarios.map((s) => (
@@ -234,5 +294,15 @@ export function Chat({
         </div>
       </footer>
     </section>
+  );
+}
+
+function DuoLabel({ grounding }: { grounding: "none" | "data" | "full" }) {
+  const l = SIDE_LABEL[grounding];
+  return (
+    <div className={`duo-label${grounding === "full" ? " is-main" : ""}`}>
+      <strong>{l.name}</strong>
+      <span>{l.note}</span>
+    </div>
   );
 }

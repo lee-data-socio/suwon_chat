@@ -5,11 +5,12 @@ from suwon_chat import api
 
 
 @pytest.fixture()
-def client(service, report_index, monkeypatch):
+def client(service, report_index, concept_index, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with TestClient(api.app) as c:
         api.app.state.service = service      # 테스트용으로 새로 색인한 DB를 쓴다
         api.app.state.reports = report_index
+        api.app.state.concepts = concept_index
         yield c
 
 
@@ -47,9 +48,10 @@ def test_chat_rejects_malformed_history(client):
 
 
 def _fake_run_chat(seen):
-    async def run(client, service, history, panel, reports=None):
+    async def run(client, service, history, panel, reports=None, grounding="full", concepts=None):
         seen["panel"] = panel
         seen["history"] = history
+        seen["grounding"] = grounding
         yield "done", {"stop_reason": "end_turn"}
     return run
 
@@ -78,7 +80,7 @@ def test_long_conversation_is_accepted(client, monkeypatch):
 def test_server_failure_ends_the_stream_with_an_error_event(client, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
-    async def broken(client, service, history, panel, reports=None):
+    async def broken(client, service, history, panel, reports=None, grounding="full", concepts=None):
         yield "text", {"delta": "쓰다가"}
         raise RuntimeError("예상하지 못한 실패")
     monkeypatch.setattr(api, "run_chat", broken)
@@ -163,25 +165,47 @@ def test_saved_answer_replaces_a_failed_connection_but_not_a_half_written_answer
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     body = {"messages": [{"role": "user", "content": "질문"}], "scenario_id": "S1"}
 
-    async def offline(client, service, history, panel, reports=None):
+    async def offline(client, service, history, panel, reports=None, grounding="full", concepts=None):
         yield "error", {"code": "connection", "message": "연결 실패"}
     monkeypatch.setattr(api, "run_chat", offline)
     assert [e for e, _ in _events(client.post("/api/chat", json=body).text)][0] == "saved"
 
-    async def cut_midway(client, service, history, panel, reports=None):
+    async def cut_midway(client, service, history, panel, reports=None, grounding="full", concepts=None):
         yield "text", {"delta": "쓰다가"}
         yield "error", {"code": "connection", "message": "연결 실패"}
     monkeypatch.setattr(api, "run_chat", cut_midway)
     names = [e for e, _ in _events(client.post("/api/chat", json=body).text)]
     assert names == ["text", "error"]            # 이미 쓴 글 뒤에 저장된 답변을 이어 붙이지 않는다
 
-    async def refused(client, service, history, panel, reports=None):
+    async def refused(client, service, history, panel, reports=None, grounding="full", concepts=None):
         yield "error", {"code": "refusal", "message": "답하지 못함"}
     monkeypatch.setattr(api, "run_chat", refused)
     assert [e for e, _ in _events(client.post("/api/chat", json=body).text)] == ["error"]   # 거절은 연결 문제가 아니다
 
-    async def works(client, service, history, panel, reports=None):
+    async def works(client, service, history, panel, reports=None, grounding="full", concepts=None):
         yield "text", {"delta": "실제 답변"}
         yield "done", {"stop_reason": "end_turn"}
     monkeypatch.setattr(api, "run_chat", works)
     assert [e for e, _ in _events(client.post("/api/chat", json=body).text)] == ["text", "done"]   # 될 때는 실제 답변
+
+
+def test_grounding_level_reaches_the_chat_and_general_level_drops_the_panel(client, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    seen = {}
+    monkeypatch.setattr(api, "run_chat", _fake_run_chat(seen))
+    body = {"messages": [{"role": "user", "content": "질문"}],
+            "panel": {"qkey": "q189_W2025", "attribute": "TENURE", "adapter": "exp1"}}
+    client.post("/api/chat", json=body)
+    assert seen["grounding"] == "full" and seen["panel"] is not None
+    client.post("/api/chat", json={**body, "grounding": "data"})
+    assert seen["grounding"] == "data" and seen["panel"] is not None
+    client.post("/api/chat", json={**body, "grounding": "none"})
+    assert seen["grounding"] == "none" and seen["panel"] is None
+    assert client.post("/api/chat", json={**body, "grounding": "rag"}).status_code == 422
+
+
+def test_saved_answer_is_never_used_for_a_lower_grounding_level(client, saved_answers):
+    for level in ("none", "data"):
+        body = {"messages": [{"role": "user", "content": "점유형태별로 보여 줘"}], "scenario_id": "S1", "grounding": level}
+        events = _events(client.post("/api/chat", json=body).text)
+        assert [e for e, _ in events] == ["error"] and events[0][1]["code"] == "no_api_key"

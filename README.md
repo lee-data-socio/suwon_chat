@@ -39,6 +39,7 @@ cp .env.example .env               # ANTHROPIC_API_KEY= 뒤에 키를 적는다
 cd backend
 python -m suwon_chat.build_index   # 예측과 실측 → data/suwon.db. 끝에 자체 점검을 돈다
 python -m suwon_chat.reports       # 참고 문서 색인. 임베딩 모델(약 470MB)을 처음 한 번 내려받는다
+python -m suwon_chat.concepts      # 문항 검색 색인 (개념 사전 concepts/개념사전.md + 문항)
 
 # 4. 화면 빌드 (처음 한 번)
 cd ../frontend
@@ -144,6 +145,16 @@ PREDICT_BACKEND=gguf python -m uvicorn suwon_chat.api:app --port 8000
 - **키가 없거나 인터넷이 끊기면** 추천 질문은 미리 저장해 둔 답변(`backend/suwon_chat/saved_answers.json`)으로 나오고 화면에 "저장된 답변"이라고 표시된다. 차트와 참고 문서는 그대로 나온다. 직접 입력한 질문은 안내 문구로 끝난다.
 - 저장된 답변을 새로 받으려면 서버를 띄운 채 `python scripts/save_answers.py`를 돌린다(요금이 든다). 받은 뒤에는 사람이 읽고 다듬는다.
 - 끊긴 상황을 미리 보려면 `ANTHROPIC_BASE_URL=http://127.0.0.1:9 python -m uvicorn suwon_chat.api:app --port 8001`.
+
+## 질문 이해 (개념 사전)
+
+시청 담당자는 조사표 문구로 묻지 않는다("월세 사는 사람들 형편 어때?"). `concepts/개념사전.md`는 문항마다 조사가 재는 개념, 그 정의, 담당자가 쓸 법한 일상 표현을 적은 문서이고, 문항 검색은 이 사전을 덧붙인 의미 검색이다(로컬 임베딩).
+
+- 대화 모델에는 문항 목록을 주지 않는다. 문항은 `search_questions`로만 찾는다. 작은 로컬 모델은 문항 목록 전체를 받아 판단하기 어렵기 때문이다.
+- 답변 위의 **질문 이해** 칸은 같은 질문을 단어 검색(RAG 없음)과 개념 사전 검색(RAG)으로 각각 찾은 문항 후보를 나란히 보인다. 답변에 쓴 문항은 표시된다.
+- 근거 단계 `data`는 단어 검색만, `full`은 개념 사전 검색을 쓴다.
+- 사전을 고치면 `python -m suwon_chat.concepts`로 색인을 다시 만든다.
+- 담당자식 질문 40개로 검색 방식을 견준다: `cd backend && python ../scripts/eval_question_search.py --show`. 1순위 적중은 단어 검색 8/20·8/20, 개념 사전 검색 16/20·19/20이다(2026-11-20).
 
 ## 참고 문서
 

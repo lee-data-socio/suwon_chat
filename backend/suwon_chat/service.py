@@ -381,7 +381,9 @@ class Service:
             "속성": p["attribute"]["label"],
             "어댑터": p["adapter"]["label"],
             "자료_출처": "사전 계산" if p["source"] == "precomputed" else "실시간",
-            "오차_지표": "WD(0~1, 작을수록 가까움)" if s["error_metric"] == "wd" else "TV(0~1, 작을수록 가까움)",
+            # 이 문항이 같은 문구·보기로 있었던 지난 조사 연도. 비어 있으면 지난 조사 값을 말하지 않는다
+            "지난_조사_연도": q["history_years"],
+            "오차_지표": ("0~1, 작을수록 가까움. 연구용 지표라 답변에는 숫자 대신 `_읽기` 표현을 쓴다"),
             "평균_오차": r4(s["error"]),
             "평균_오차_읽기": s["error_readable"]["text"],
             "학습_전_모델_오차": r4(s["zero_shot_error"]),
@@ -427,6 +429,15 @@ class Service:
                 row[f"예측_'{q['options'][0]}'_비율_퍼센트"] = pct(g["predicted"][0])
                 row[f"실측_'{q['options'][0]}'_비율_퍼센트"] = pct(g["actual"][0])
                 row["비율_차이_예측_빼기_실측_퍼센트포인트"] = pct(g["predicted"][0] - g["actual"][0])
+            # 지난 조사(2023·2024년)의 실제 값. 예측의 근거가 아니라 참고로 견줄 값이다
+            if g["history"]:
+                years = {f"{h['year']}년": h for h in g["history"]}
+                if kind == "순서형":
+                    row["지난_조사_평균"] = {y: r2(h["mean"]) for y, h in years.items()}
+                elif kind == "이분형":
+                    row[f"지난_조사_'{q['options'][0]}'_비율_퍼센트"] = {y: pct(h["dist"][0]) for y, h in years.items()}
+                else:
+                    row["지난_조사_분포_퍼센트"] = {y: [pct(v) for v in h["dist"]] for y, h in years.items()}
             row["분포_오차"] = r4(g["error"])
             row["분포_오차_읽기"] = read(g["error"])
             if g["reference"]:

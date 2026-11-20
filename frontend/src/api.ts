@@ -1,15 +1,4 @@
-import type {
-  ChatStatus,
-  CompareKey,
-  ContextItem,
-  ContextResult,
-  Meta,
-  PanelState,
-  Prediction,
-  QuestionSummary,
-  Report,
-  Scenario,
-} from "./types";
+import type { ChatStatus, CompareKey, ContextItem, ContextResult, Grounding, Meta, PanelState, Prediction, QuestionSummary, Report, Scenario, Understanding } from "./types";
 
 async function get<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -76,6 +65,7 @@ export type ChatEvent =
   | { type: "panel"; state: PanelState; compare: "actual" | CompareKey; prediction: Prediction }
   | { type: "context"; qkey: string | null; query: string; items: ContextItem[] }
   | { type: "saved"; saved_at: string; model: string }
+  | ({ type: "understanding" } & Understanding)
   | { type: "new_prediction"; prediction: Prediction }
   | { type: "done"; stop_reason: string }
   | { type: "error"; code: string; message: string };
@@ -88,11 +78,18 @@ export async function streamChat(
   /** 추천 질문 버튼으로 보낸 경우 그 시나리오의 id. 대화 모델을 쓸 수 없을 때 서버가 저장된 답변을 찾는 데 쓴다 */
   scenarioId?: string,
   signal?: AbortSignal,
+  /** 근거 단계. 비우면 서버 기본값(full) */
+  grounding?: Grounding,
 ): Promise<void> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(scenarioId ? { messages, panel, scenario_id: scenarioId } : { messages, panel }),
+    body: JSON.stringify({
+      messages,
+      panel,
+      ...(scenarioId ? { scenario_id: scenarioId } : {}),
+      ...(grounding ? { grounding } : {}),
+    }),
     signal,
   });
   if (!res.ok || !res.body) {
